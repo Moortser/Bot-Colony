@@ -30,13 +30,13 @@ anchor_left = 0.0
 anchor_top = 0.0
 anchor_right = 0.0
 anchor_bottom = 0.0
-offset_left = 280.0
-offset_top = 10.0
-offset_right = 640.0
-offset_bottom = 420.0
+offset_left = 80.0
+offset_top = 40.0
+offset_right = 820.0
+offset_bottom = 440.0
 script = ExtResource(4)
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/InventoryOverlay"]
+[node name="MarginContainer" type="MarginContainer" parent="UI/InventoryOverlay"]
 anchor_left = 0.0
 anchor_top = 0.0
 anchor_right = 1.0
@@ -46,24 +46,33 @@ offset_top = 8.0
 offset_right = -8.0
 offset_bottom = -8.0
 
-[node name="TitleLabel" type="Label" parent="UI/InventoryOverlay/VBoxContainer"]
-text = "Inventory / Crafting"
+[node name="HBoxContainer" type="HBoxContainer" parent="UI/InventoryOverlay/MarginContainer"]
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 0.0
+offset_bottom = 0.0
+custom_minimum_size = Vector2(720, 360)
 
-[node name="InventoryScroll" type="ScrollContainer" parent="UI/InventoryOverlay/VBoxContainer"]
-custom_minimum_size = Vector2(0, 120)
+[node name="InventoryPanel" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer"]
+size_flags_horizontal = 3
 
-[node name="InventoryLabel" type="Label" parent="UI/InventoryOverlay/VBoxContainer/InventoryScroll"]
-text = ""
+[node name="InventoryTitle" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/InventoryPanel"]
+text = "Inventory"
 
-[node name="CraftingSection" type="VBoxContainer" parent="UI/InventoryOverlay/VBoxContainer"]
+[node name="InventoryGrid" type="GridContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/InventoryPanel"]
+columns = 6
+custom_minimum_size = Vector2(360, 288)
 
-[node name="CraftingTitle" type="Label" parent="UI/InventoryOverlay/VBoxContainer/CraftingSection"]
+[node name="CraftingPanel" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer"]
+size_flags_horizontal = 3
+
+[node name="CraftingTitle" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
 text = "Crafting"
 
-[node name="RecipesContainer" type="VBoxContainer" parent="UI/InventoryOverlay/VBoxContainer/CraftingSection"]
+[node name="CraftingList" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
+size_flags_horizontal = 3
 
-[node name="CloseHint" type="Label" parent="UI/InventoryOverlay/VBoxContainer"]
+[node name="CloseHint" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
 text = "Press Tab to close"
-
-[node name="DebugLabel" type="Label" parent="UI/InventoryOverlay/VBoxContainer"]
-text = "Inventory Open = false"

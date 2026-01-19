@@ -15,7 +15,6 @@ const ACTIONS_SCRIPT = preload("res://scripts/actions.gd")
 
 @export var inventory_overlay_path: NodePath = NodePath("UI/InventoryOverlay")
 @onready var inventory_overlay = get_node(inventory_overlay_path)
-@onready var inventory_debug_label: Label = $UI/InventoryOverlay/VBoxContainer/DebugLabel
 
 var placement_mode := false
 var inventory_open := false
@@ -44,8 +43,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func toggle_inventory() -> void:
 	inventory_open = not inventory_open
 	inventory_overlay.visible = inventory_open
-	inventory_debug_label.text = "Inventory Open = %s" % str(inventory_open)
-	print("TAB TOGGLE -> ", inventory_open)
 
 func _handle_input() -> void:
 	if inventory_open:
