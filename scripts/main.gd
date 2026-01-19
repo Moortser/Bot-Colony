@@ -15,7 +15,6 @@ const Actions = preload("res://scripts/actions.gd")
 
 @onready var inventory_label: Label = $UI/Panel/VBoxContainer/InventoryLabel
 @onready var furnace_label: Label = $UI/Panel/VBoxContainer/FurnaceLabel
-@onready var mine_button: Button = $UI/Panel/VBoxContainer/MineButton
 @onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
 
 var placement_mode := false
@@ -26,11 +25,12 @@ func _ready() -> void:
 	player.grid_pos = start_pos
 	player.position = sim.grid_to_world(start_pos)
 	_setup_resources()
-	mine_button.pressed.connect(_on_mine_pressed)
 	inventory_overlay.setup(player.inventory, _request_furnace_placement)
 	_update_ui()
 
 func _process(delta: float) -> void:
+	if Input.is_action_just_pressed("toggle_inventory"):
+		_toggle_inventory()
 	_handle_input()
 	sim.tick(delta)
 	sim.transfer_player_items_to_furnace(player.grid_pos, player.inventory)
@@ -38,9 +38,15 @@ func _process(delta: float) -> void:
 	if inventory_overlay.visible:
 		inventory_overlay.refresh()
 
-func _handle_input() -> void:
+func _unhandled_input(_event: InputEvent) -> void:
 	if Input.is_action_just_pressed("toggle_inventory"):
-		inventory_overlay.visible = not inventory_overlay.visible
+		_toggle_inventory()
+
+func _toggle_inventory() -> void:
+	print("toggle_inventory pressed")
+	inventory_overlay.visible = not inventory_overlay.visible
+
+func _handle_input() -> void:
 	var overlay_open: bool = inventory_overlay.visible
 	if overlay_open:
 		return
@@ -74,9 +80,6 @@ func _add_resource(pos: Vector2i, resource: String, amount: int) -> void:
 	node.position = sim.grid_to_world(pos)
 	world.add_child(node)
 	sim.register_resource(node)
-
-func _on_mine_pressed() -> void:
-	Actions.mine_at_player(sim, player)
 
 func _request_furnace_placement() -> void:
 	if Actions.arm_furnace_placement(player.inventory):

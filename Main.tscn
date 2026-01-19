@@ -48,9 +48,6 @@ text = "Inventory"
 [node name="FurnaceLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 text = "Furnace"
 
-[node name="MineButton" type="Button" parent="UI/Panel/VBoxContainer"]
-text = "Mine"
-
 [node name="InventoryOverlay" type="PanelContainer" parent="UI"]
 visible = false
 anchor_left = 0.0
