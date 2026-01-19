@@ -1,0 +1,78 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id=1]
+[ext_resource type="Script" path="res://scripts/sim.gd" id=2]
+[ext_resource type="Script" path="res://scripts/player.gd" id=3]
+[ext_resource type="Script" path="res://scripts/inventory_overlay.gd" id=4]
+
+[node name="Main" type="Node2D"]
+script = ExtResource(1)
+inventory_overlay_path = NodePath("UI/InventoryOverlay")
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Units" type="Node2D" parent="."]
+
+[node name="Prime" type="Node2D" parent="Units"]
+script = ExtResource(3)
+
+[node name="Systems" type="Node" parent="."]
+
+[node name="Sim" type="Node" parent="Systems"]
+script = ExtResource(2)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="InventoryOverlay" type="PanelContainer" parent="UI"]
+visible = false
+focus_mode = 0
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_left = 80.0
+offset_top = 40.0
+offset_right = 820.0
+offset_bottom = 440.0
+script = ExtResource(4)
+
+[node name="MarginContainer" type="MarginContainer" parent="UI/InventoryOverlay"]
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="UI/InventoryOverlay/MarginContainer"]
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 0.0
+offset_bottom = 0.0
+custom_minimum_size = Vector2(720, 360)
+
+[node name="InventoryPanel" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer"]
+size_flags_horizontal = 3
+
+[node name="InventoryTitle" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/InventoryPanel"]
+text = "Inventory"
+
+[node name="InventoryGrid" type="GridContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/InventoryPanel"]
+columns = 6
+custom_minimum_size = Vector2(360, 288)
+
+[node name="CraftingPanel" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer"]
+size_flags_horizontal = 3
+
+[node name="CraftingTitle" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
+text = "Crafting"
+
+[node name="CraftingList" type="VBoxContainer" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
+size_flags_horizontal = 3
+
+[node name="CloseHint" type="Label" parent="UI/InventoryOverlay/MarginContainer/HBoxContainer/CraftingPanel"]
+text = "Press Tab to close"
