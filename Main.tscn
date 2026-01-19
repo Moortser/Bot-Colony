@@ -51,9 +51,6 @@ text = "Furnace"
 [node name="MineButton" type="Button" parent="UI/Panel/VBoxContainer"]
 text = "Mine"
 
-[node name="BuildFurnaceButton" type="Button" parent="UI/Panel/VBoxContainer"]
-text = "Build Furnace"
-
 [node name="InventoryOverlay" type="PanelContainer" parent="UI"]
 visible = false
 anchor_left = 0.0
@@ -93,4 +90,4 @@ text = "Crafting"
 [node name="RecipesContainer" type="VBoxContainer" parent="UI/InventoryOverlay/VBoxContainer/CraftingSection"]
 
 [node name="CloseHint" type="Label" parent="UI/InventoryOverlay/VBoxContainer"]
-text = "Press I to close"
+text = "Press Tab to close"

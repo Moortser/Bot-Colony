@@ -7,9 +7,11 @@ const Recipes = preload("res://scripts/recipes.gd")
 @onready var recipes_container: VBoxContainer = $VBoxContainer/CraftingSection/RecipesContainer
 
 var player_inventory: Dictionary
+var furnace_request: Callable
 
-func setup(inventory: Dictionary) -> void:
+func setup(inventory: Dictionary, furnace_callback: Callable) -> void:
 	player_inventory = inventory
+	furnace_request = furnace_callback
 	_update_ui()
 
 func refresh() -> void:
@@ -51,6 +53,11 @@ func _build_recipe_list() -> void:
 		if not can_craft:
 			name_label.text += " (missing)"
 		craft_button.pressed.connect(func() -> void:
+			if recipe_id == "furnace":
+				if furnace_request.is_valid():
+					furnace_request.call()
+				_update_ui()
+				return
 			if Actions.craft_item(recipe_id, player_inventory):
 				_update_ui()
 		)

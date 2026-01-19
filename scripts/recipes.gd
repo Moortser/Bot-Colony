@@ -17,4 +17,8 @@ const RECIPES := {
 		"output": {"item": "chassis", "amount": 1},
 		"cost": {"iron_plate": 4, "gear": 2},
 	},
+	"furnace": {
+		"output": {"item": "furnace", "amount": 1},
+		"cost": {"stone": 5},
+	},
 }

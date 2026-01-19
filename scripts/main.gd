@@ -6,6 +6,7 @@ const ResourceNode = preload("res://scripts/resource_node.gd")
 const Furnace = preload("res://scripts/furnace.gd")
 const Player = preload("res://scripts/player.gd")
 const InventoryOverlay = preload("res://scripts/inventory_overlay.gd")
+const Actions = preload("res://scripts/actions.gd")
 
 @onready var world: Node2D = $World
 @onready var units: Node2D = $Units
@@ -15,8 +16,9 @@ const InventoryOverlay = preload("res://scripts/inventory_overlay.gd")
 @onready var inventory_label: Label = $UI/Panel/VBoxContainer/InventoryLabel
 @onready var furnace_label: Label = $UI/Panel/VBoxContainer/FurnaceLabel
 @onready var mine_button: Button = $UI/Panel/VBoxContainer/MineButton
-@onready var build_furnace_button: Button = $UI/Panel/VBoxContainer/BuildFurnaceButton
 @onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
+
+var placement_mode := false
 
 func _ready() -> void:
 	sim.world_node = world
@@ -25,8 +27,7 @@ func _ready() -> void:
 	player.position = sim.grid_to_world(start_pos)
 	_setup_resources()
 	mine_button.pressed.connect(_on_mine_pressed)
-	build_furnace_button.pressed.connect(_on_build_furnace_pressed)
-	inventory_overlay.setup(player.inventory)
+	inventory_overlay.setup(player.inventory, _request_furnace_placement)
 	_update_ui()
 
 func _process(delta: float) -> void:
@@ -43,14 +44,20 @@ func _handle_input() -> void:
 	var overlay_open: bool = inventory_overlay.visible
 	if overlay_open:
 		return
+	if Input.is_action_just_pressed("ui_cancel"):
+		placement_mode = false
+	if Input.is_action_just_pressed("mine_action"):
+		Actions.mine_at_player(sim, player)
+	if Input.is_action_just_pressed("build_action"):
+		_handle_build_action()
 	var direction := Vector2i.ZERO
-	if Input.is_action_just_pressed("ui_up"):
+	if Input.is_action_just_pressed("move_up"):
 		direction = Vector2i.UP
-	elif Input.is_action_just_pressed("ui_down"):
+	elif Input.is_action_just_pressed("move_down"):
 		direction = Vector2i.DOWN
-	elif Input.is_action_just_pressed("ui_left"):
+	elif Input.is_action_just_pressed("move_left"):
 		direction = Vector2i.LEFT
-	elif Input.is_action_just_pressed("ui_right"):
+	elif Input.is_action_just_pressed("move_right"):
 		direction = Vector2i.RIGHT
 	if direction != Vector2i.ZERO:
 		player.move(direction, sim)
@@ -69,10 +76,18 @@ func _add_resource(pos: Vector2i, resource: String, amount: int) -> void:
 	sim.register_resource(node)
 
 func _on_mine_pressed() -> void:
-	player.mine(sim)
+	Actions.mine_at_player(sim, player)
 
-func _on_build_furnace_pressed() -> void:
-	sim.build_furnace_at(player.grid_pos, player.inventory)
+func _request_furnace_placement() -> void:
+	if Actions.arm_furnace_placement(player.inventory):
+		placement_mode = true
+
+func _handle_build_action() -> void:
+	if not placement_mode:
+		placement_mode = Actions.arm_furnace_placement(player.inventory)
+		return
+	if Actions.place_furnace(sim, player.grid_pos, player.inventory):
+		placement_mode = false
 
 func _update_ui() -> void:
 	var stone_count: int = int(player.inventory.get(Constants.ITEM_STONE, 0))
