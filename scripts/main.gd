@@ -16,6 +16,7 @@ const Actions = preload("res://scripts/actions.gd")
 @onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
 
 var placement_mode := false
+var inventory_open := false
 
 func _ready() -> void:
 	sim.world_node = world
@@ -27,24 +28,17 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("toggle_inventory"):
-		_toggle_inventory()
+		inventory_open = not inventory_open
+		inventory_overlay.visible = inventory_open
+		print("toggle_inventory -> ", inventory_open)
 	_handle_input()
 	sim.tick(delta)
 	sim.transfer_player_items_to_furnace(player.grid_pos, player.inventory)
 	if inventory_overlay.visible:
 		inventory_overlay.refresh()
 
-func _unhandled_input(_event: InputEvent) -> void:
-	if Input.is_action_just_pressed("toggle_inventory"):
-		_toggle_inventory()
-
-func _toggle_inventory() -> void:
-	print("toggle_inventory pressed")
-	inventory_overlay.visible = not inventory_overlay.visible
-
 func _handle_input() -> void:
-	var overlay_open: bool = inventory_overlay.visible
-	if overlay_open:
+	if inventory_open:
 		return
 	if Input.is_action_just_pressed("ui_cancel"):
 		placement_mode = false

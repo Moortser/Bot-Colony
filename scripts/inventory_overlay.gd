@@ -12,10 +12,17 @@ var furnace_request: Callable
 func setup(inventory: Dictionary, furnace_callback: Callable) -> void:
 	player_inventory = inventory
 	furnace_request = furnace_callback
+	_set_focus_none()
 	_update_ui()
 
 func refresh() -> void:
 	_update_ui()
+
+func _set_focus_none() -> void:
+	focus_mode = Control.FOCUS_NONE
+	for child in get_children():
+		if child is Control:
+			child.focus_mode = Control.FOCUS_NONE
 
 func _update_ui() -> void:
 	if player_inventory == null:
