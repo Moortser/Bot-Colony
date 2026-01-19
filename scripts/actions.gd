@@ -7,13 +7,15 @@ static func can_add_item(inventory: Array, item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
-		var slot_count: int = int(slot.get("count", 0))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
+		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == item and slot_count > 0:
 			return true
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
-		var slot_count: int = int(slot.get("count", 0))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
+		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == "" and slot_count == 0:
 			return true
 	return false
@@ -22,16 +24,18 @@ static func add_item(inventory: Array, item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item == item:
-			slot["count"] = int(slot.get("count", 0)) + amount
+			slot_dict["count"] = int(slot_dict.get("count", 0)) + amount
 			return true
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
-		var slot_count: int = int(slot.get("count", 0))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
+		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == "" and slot_count == 0:
-			slot["item"] = item
-			slot["count"] = amount
+			slot_dict["item"] = item
+			slot_dict["count"] = amount
 			return true
 	return false
 
@@ -40,10 +44,11 @@ static func has_items(inventory: Array, item: String, amount: int) -> bool:
 		return false
 	var remaining := amount
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item != item:
 			continue
-		remaining -= int(slot.get("count", 0))
+		remaining -= int(slot_dict.get("count", 0))
 		if remaining <= 0:
 			return true
 	return false
@@ -55,18 +60,19 @@ static func remove_item(inventory: Array, item: String, amount: int) -> bool:
 		return false
 	var remaining := amount
 	for slot in inventory:
-		var slot_item: String = str(slot.get("item", ""))
+		var slot_dict: Dictionary = slot as Dictionary
+		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item != item:
 			continue
-		var slot_count: int = int(slot.get("count", 0))
+		var slot_count: int = int(slot_dict.get("count", 0))
 		var taken := min(remaining, slot_count)
 		slot_count -= taken
 		remaining -= taken
 		if slot_count <= 0:
-			slot["item"] = ""
-			slot["count"] = 0
+			slot_dict["item"] = ""
+			slot_dict["count"] = 0
 		else:
-			slot["count"] = slot_count
+			slot_dict["count"] = slot_count
 		if remaining <= 0:
 			return true
 	return remaining <= 0

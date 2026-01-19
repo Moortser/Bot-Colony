@@ -60,7 +60,7 @@ func _update_inventory_slots() -> void:
 		var label := slot_labels[i]
 		if i < player_inventory.size():
 			var slot: Dictionary = player_inventory[i] as Dictionary
-			var item_name: String = str(slot.get("item", ""))
+			var item_name: String = slot.get("item", "") as String
 			var count: int = int(slot.get("count", 0))
 			if item_name == "" or count <= 0:
 				label.text = ""
