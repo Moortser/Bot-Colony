@@ -19,10 +19,13 @@ func refresh() -> void:
 	_update_ui()
 
 func _set_focus_none() -> void:
-	focus_mode = Control.FOCUS_NONE
-	for child in get_children():
-		if child is Control:
-			child.focus_mode = Control.FOCUS_NONE
+	_set_focus_none_recursive(self)
+
+func _set_focus_none_recursive(node: Node) -> void:
+	if node is Control:
+		node.focus_mode = Control.FOCUS_NONE
+	for child in node.get_children():
+		_set_focus_none_recursive(child)
 
 func _update_ui() -> void:
 	if player_inventory == null:

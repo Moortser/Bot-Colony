@@ -13,7 +13,9 @@ const ACTIONS_SCRIPT = preload("res://scripts/actions.gd")
 @onready var sim: Sim = $Systems/Sim
 @onready var player: Player = $Units/Prime
 
-@onready var inventory_overlay: Control = $UI/InventoryOverlay
+@export var inventory_overlay_path: NodePath = NodePath("UI/InventoryOverlay")
+@onready var inventory_overlay = get_node(inventory_overlay_path)
+@onready var inventory_debug_label: Label = $UI/InventoryOverlay/VBoxContainer/DebugLabel
 
 var placement_mode := false
 var inventory_open := false
@@ -28,14 +30,22 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("toggle_inventory"):
-		inventory_open = not inventory_open
-		inventory_overlay.visible = inventory_open
-		print("toggle_inventory -> ", inventory_open)
+		toggle_inventory()
 	_handle_input()
 	sim.tick(delta)
 	sim.transfer_player_items_to_furnace(player.grid_pos, player.inventory)
 	if inventory_overlay.visible:
 		inventory_overlay.refresh()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+		toggle_inventory()
+
+func toggle_inventory() -> void:
+	inventory_open = not inventory_open
+	inventory_overlay.visible = inventory_open
+	inventory_debug_label.text = "Inventory Open = %s" % str(inventory_open)
+	print("TAB TOGGLE -> ", inventory_open)
 
 func _handle_input() -> void:
 	if inventory_open:
