@@ -47,7 +47,7 @@ func register_resource(node: ResourceNode) -> void:
 func get_resource_at(pos: Vector2i) -> ResourceNode:
 	return resources.get(pos) as ResourceNode
 
-func mine_resource_at(pos: Vector2i, inventory: Array) -> bool:
+func mine_resource_at(pos: Vector2i, inventory: Array[Dictionary]) -> bool:
 	var node: ResourceNode = resources.get(pos)
 	if node == null:
 		return false
@@ -62,7 +62,7 @@ func mine_resource_at(pos: Vector2i, inventory: Array) -> bool:
 func can_build_furnace_at(pos: Vector2i) -> bool:
 	return not furnaces.has(pos)
 
-func build_furnace_at(pos: Vector2i, inventory: Array) -> bool:
+func build_furnace_at(pos: Vector2i, inventory: Array[Dictionary]) -> bool:
 	if not can_build_furnace_at(pos):
 		return false
 	var furnace := FURNACE_SCENE.new()
@@ -75,7 +75,7 @@ func build_furnace_at(pos: Vector2i, inventory: Array) -> bool:
 func get_furnace_at(pos: Vector2i) -> Furnace:
 	return furnaces.get(pos) as Furnace
 
-func transfer_player_items_to_furnace(pos: Vector2i, inventory: Array) -> void:
+func transfer_player_items_to_furnace(pos: Vector2i, inventory: Array[Dictionary]) -> void:
 	var furnace: Furnace = furnaces.get(pos)
 	if furnace == null:
 		return

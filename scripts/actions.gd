@@ -3,34 +3,34 @@ extends Node
 const Recipes = preload("res://scripts/recipes.gd")
 const Constants = preload("res://scripts/constants.gd")
 
-static func can_add_item(inventory: Array, item: String, amount: int) -> bool:
+static func can_add_item(inventory: Array[Dictionary], item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == item and slot_count > 0:
 			return true
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == "" and slot_count == 0:
 			return true
 	return false
 
-static func add_item(inventory: Array, item: String, amount: int) -> bool:
+static func add_item(inventory: Array[Dictionary], item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item == item:
 			slot_dict["count"] = int(slot_dict.get("count", 0)) + amount
 			return true
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		var slot_count: int = int(slot_dict.get("count", 0))
 		if slot_item == "" and slot_count == 0:
@@ -39,12 +39,12 @@ static func add_item(inventory: Array, item: String, amount: int) -> bool:
 			return true
 	return false
 
-static func has_items(inventory: Array, item: String, amount: int) -> bool:
+static func has_items(inventory: Array[Dictionary], item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
-	var remaining := amount
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	var remaining: int = amount
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item != item:
 			continue
@@ -53,19 +53,19 @@ static func has_items(inventory: Array, item: String, amount: int) -> bool:
 			return true
 	return false
 
-static func remove_item(inventory: Array, item: String, amount: int) -> bool:
+static func remove_item(inventory: Array[Dictionary], item: String, amount: int) -> bool:
 	if amount <= 0:
 		return false
 	if not has_items(inventory, item, amount):
 		return false
-	var remaining := amount
-	for slot in inventory:
-		var slot_dict: Dictionary = slot as Dictionary
+	var remaining: int = amount
+	for slot_value in inventory:
+		var slot_dict: Dictionary = slot_value as Dictionary
 		var slot_item: String = slot_dict.get("item", "") as String
 		if slot_item != item:
 			continue
 		var slot_count: int = int(slot_dict.get("count", 0))
-		var taken := min(remaining, slot_count)
+		var taken: int = min(remaining, slot_count)
 		slot_count -= taken
 		remaining -= taken
 		if slot_count <= 0:
@@ -80,7 +80,7 @@ static func remove_item(inventory: Array, item: String, amount: int) -> bool:
 static func mine_at_player(sim: Sim, player: Player) -> bool:
 	return player.mine(sim)
 
-static func can_craft(recipe_id: String, inventory: Array) -> bool:
+static func can_craft(recipe_id: String, inventory: Array[Dictionary]) -> bool:
 	var recipe: Dictionary = Recipes.RECIPES.get(recipe_id, {}) as Dictionary
 	if recipe.is_empty():
 		return false
@@ -91,7 +91,7 @@ static func can_craft(recipe_id: String, inventory: Array) -> bool:
 			return false
 	return true
 
-static func craft_item(recipe_id: String, inventory: Array) -> bool:
+static func craft_item(recipe_id: String, inventory: Array[Dictionary]) -> bool:
 	var recipe: Dictionary = Recipes.RECIPES.get(recipe_id, {}) as Dictionary
 	if recipe.is_empty():
 		return false
@@ -111,10 +111,10 @@ static func craft_item(recipe_id: String, inventory: Array) -> bool:
 		return false
 	return add_item(inventory, output_item, output_amount)
 
-static func arm_furnace_placement(inventory: Array) -> bool:
+static func arm_furnace_placement(inventory: Array[Dictionary]) -> bool:
 	return can_craft("furnace", inventory)
 
-static func place_furnace(sim: Sim, pos: Vector2i, inventory: Array) -> bool:
+static func place_furnace(sim: Sim, pos: Vector2i, inventory: Array[Dictionary]) -> bool:
 	if not remove_item(inventory, "stone", Constants.FURNACE_STONE_COST):
 		return false
 	return sim.build_furnace_at(pos, inventory)

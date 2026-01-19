@@ -7,7 +7,7 @@ const Constants = preload("res://scripts/constants.gd")
 var grid_pos := Vector2i.ZERO
 const SLOT_COUNT := 24
 
-var inventory: Array = []
+var inventory: Array[Dictionary] = []
 
 var _rect: ColorRect
 
@@ -32,8 +32,9 @@ func mine(sim: Sim) -> bool:
 func _update_world_position() -> void:
 	position = Vector2(grid_pos.x * Constants.TILE_SIZE, grid_pos.y * Constants.TILE_SIZE)
 
-func _create_empty_inventory() -> Array:
-	var slots: Array = []
+func _create_empty_inventory() -> Array[Dictionary]:
+	var slots: Array[Dictionary] = []
 	for _i in range(SLOT_COUNT):
-		slots.append({"item": "", "count": 0})
+		var slot: Dictionary = {"item": "", "count": 0}
+		slots.append(slot)
 	return slots

@@ -9,7 +9,7 @@ const SLOT_SIZE := Vector2(48, 48)
 @onready var inventory_grid: GridContainer = $MarginContainer/HBoxContainer/InventoryPanel/InventoryGrid
 @onready var recipes_container: VBoxContainer = $MarginContainer/HBoxContainer/CraftingPanel/CraftingList
 
-var player_inventory: Array
+var player_inventory: Array[Dictionary]
 var furnace_request: Callable
 var slot_labels: Array[Label] = []
 
@@ -17,7 +17,7 @@ func _ready() -> void:
 	_set_focus_none()
 	_build_slots()
 
-func setup(inventory: Array, furnace_callback: Callable) -> void:
+func setup(inventory: Array[Dictionary], furnace_callback: Callable) -> void:
 	player_inventory = inventory
 	furnace_request = furnace_callback
 	_update_ui()
