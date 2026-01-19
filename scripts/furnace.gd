@@ -16,17 +16,18 @@ func _ready() -> void:
 	add_child(_rect)
 
 func add_item(item: String, amount: int = 1) -> void:
-	inventory[item] = inventory.get(item, 0) + amount
+	var current_amount: int = int(inventory.get(item, 0))
+	inventory[item] = current_amount + amount
 
 func remove_item(item: String, amount: int = 1) -> bool:
-	var current := inventory.get(item, 0)
-	if current < amount:
+	var current_amount: int = int(inventory.get(item, 0))
+	if current_amount < amount:
 		return false
-	inventory[item] = current - amount
+	inventory[item] = current_amount - amount
 	return true
 
 func count(item: String) -> int:
-	return inventory.get(item, 0)
+	return int(inventory.get(item, 0))
 
 func has_fuel() -> bool:
 	return count(Constants.ITEM_COAL) > 0

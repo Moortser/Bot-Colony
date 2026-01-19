@@ -64,13 +64,19 @@ func _on_build_furnace_pressed() -> void:
 	sim.build_furnace_at(player.grid_pos, player.inventory)
 
 func _update_ui() -> void:
+	var stone_count: int = int(player.inventory.get(Constants.ITEM_STONE, 0))
+	var coal_count: int = int(player.inventory.get(Constants.ITEM_COAL, 0))
+	var iron_ore_count: int = int(player.inventory.get(Constants.ITEM_IRON_ORE, 0))
+	var copper_ore_count: int = int(player.inventory.get(Constants.ITEM_COPPER_ORE, 0))
+	var iron_plate_count: int = int(player.inventory.get(Constants.ITEM_IRON_PLATE, 0))
+	var copper_plate_count: int = int(player.inventory.get(Constants.ITEM_COPPER_PLATE, 0))
 	inventory_label.text = "Inventory:\n" \
-		+ "Stone: %d\n" % player.inventory.get(Constants.ITEM_STONE, 0) \
-		+ "Coal: %d\n" % player.inventory.get(Constants.ITEM_COAL, 0) \
-		+ "Iron ore: %d\n" % player.inventory.get(Constants.ITEM_IRON_ORE, 0) \
-		+ "Copper ore: %d\n" % player.inventory.get(Constants.ITEM_COPPER_ORE, 0) \
-		+ "Iron plate: %d\n" % player.inventory.get(Constants.ITEM_IRON_PLATE, 0) \
-		+ "Copper plate: %d" % player.inventory.get(Constants.ITEM_COPPER_PLATE, 0)
+		+ "Stone: %d\n" % stone_count \
+		+ "Coal: %d\n" % coal_count \
+		+ "Iron ore: %d\n" % iron_ore_count \
+		+ "Copper ore: %d\n" % copper_ore_count \
+		+ "Iron plate: %d\n" % iron_plate_count \
+		+ "Copper plate: %d" % copper_plate_count
 
 	var furnace: Furnace = sim.get_furnace_at(player.grid_pos)
 	if furnace == null:

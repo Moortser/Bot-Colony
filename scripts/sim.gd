@@ -45,7 +45,7 @@ func register_resource(node: ResourceNode) -> void:
 	resources[world_to_grid(node.position)] = node
 
 func get_resource_at(pos: Vector2i) -> ResourceNode:
-	return resources.get(pos)
+	return resources.get(pos) as ResourceNode
 
 func mine_resource_at(pos: Vector2i, inventory: Dictionary) -> bool:
 	var node: ResourceNode = resources.get(pos)
@@ -53,7 +53,8 @@ func mine_resource_at(pos: Vector2i, inventory: Dictionary) -> bool:
 		return false
 	if not node.mine_one():
 		return false
-	inventory[node.resource_type] = inventory.get(node.resource_type, 0) + 1
+	var current_amount: int = int(inventory.get(node.resource_type, 0))
+	inventory[node.resource_type] = current_amount + 1
 	if node.amount == 0:
 		resources.erase(pos)
 		node.queue_free()
@@ -65,7 +66,7 @@ func can_build_furnace_at(pos: Vector2i) -> bool:
 func build_furnace_at(pos: Vector2i, inventory: Dictionary) -> bool:
 	if not can_build_furnace_at(pos):
 		return false
-	if inventory.get(Constants.ITEM_STONE, 0) < Constants.FURNACE_STONE_COST:
+	if int(inventory.get(Constants.ITEM_STONE, 0)) < Constants.FURNACE_STONE_COST:
 		return false
 	inventory[Constants.ITEM_STONE] -= Constants.FURNACE_STONE_COST
 	var furnace := Furnace.new()
@@ -76,14 +77,14 @@ func build_furnace_at(pos: Vector2i, inventory: Dictionary) -> bool:
 	return true
 
 func get_furnace_at(pos: Vector2i) -> Furnace:
-	return furnaces.get(pos)
+	return furnaces.get(pos) as Furnace
 
 func transfer_player_items_to_furnace(pos: Vector2i, inventory: Dictionary) -> void:
 	var furnace: Furnace = furnaces.get(pos)
 	if furnace == null:
 		return
 	for item in [Constants.ITEM_COAL, Constants.ITEM_IRON_ORE, Constants.ITEM_COPPER_ORE]:
-		var amount := inventory.get(item, 0)
-		if amount > 0:
-			furnace.add_item(item, amount)
+		var item_amount: int = int(inventory.get(item, 0))
+		if item_amount > 0:
+			furnace.add_item(item, item_amount)
 			inventory[item] = 0
