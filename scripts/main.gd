@@ -18,8 +18,9 @@ const Player = preload("res://scripts/player.gd")
 
 func _ready() -> void:
 	sim.world_node = world
-	player.grid_pos = Vector2i(2, 2)
-	player.position = sim.grid_to_world(player.grid_pos)
+	var start_pos: Vector2i = Vector2i(sim.world_size.x / 2, sim.world_size.y / 2)
+	player.grid_pos = start_pos
+	player.position = sim.grid_to_world(start_pos)
 	_setup_resources()
 	mine_button.pressed.connect(_on_mine_pressed)
 	build_furnace_button.pressed.connect(_on_build_furnace_pressed)
