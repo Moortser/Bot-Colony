@@ -5,6 +5,7 @@ const Sim = preload("res://scripts/sim.gd")
 const ResourceNode = preload("res://scripts/resource_node.gd")
 const Furnace = preload("res://scripts/furnace.gd")
 const Player = preload("res://scripts/player.gd")
+const InventoryOverlay = preload("res://scripts/inventory_overlay.gd")
 
 @onready var world: Node2D = $World
 @onready var units: Node2D = $Units
@@ -15,6 +16,7 @@ const Player = preload("res://scripts/player.gd")
 @onready var furnace_label: Label = $UI/Panel/VBoxContainer/FurnaceLabel
 @onready var mine_button: Button = $UI/Panel/VBoxContainer/MineButton
 @onready var build_furnace_button: Button = $UI/Panel/VBoxContainer/BuildFurnaceButton
+@onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
 
 func _ready() -> void:
 	sim.world_node = world
@@ -24,6 +26,7 @@ func _ready() -> void:
 	_setup_resources()
 	mine_button.pressed.connect(_on_mine_pressed)
 	build_furnace_button.pressed.connect(_on_build_furnace_pressed)
+	inventory_overlay.setup(player.inventory)
 	_update_ui()
 
 func _process(delta: float) -> void:
@@ -31,8 +34,15 @@ func _process(delta: float) -> void:
 	sim.tick(delta)
 	sim.transfer_player_items_to_furnace(player.grid_pos, player.inventory)
 	_update_ui()
+	if inventory_overlay.visible:
+		inventory_overlay.refresh()
 
 func _handle_input() -> void:
+	if Input.is_action_just_pressed("toggle_inventory"):
+		inventory_overlay.visible = not inventory_overlay.visible
+	var overlay_open: bool = inventory_overlay.visible
+	if overlay_open:
+		return
 	var direction := Vector2i.ZERO
 	if Input.is_action_just_pressed("ui_up"):
 		direction = Vector2i.UP

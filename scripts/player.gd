@@ -12,6 +12,10 @@ var inventory := {
 	Constants.ITEM_STONE: 0,
 	Constants.ITEM_IRON_PLATE: 0,
 	Constants.ITEM_COPPER_PLATE: 0,
+	Constants.ITEM_GEAR: 0,
+	Constants.ITEM_WIRE: 0,
+	Constants.ITEM_CIRCUIT: 0,
+	Constants.ITEM_CHASSIS: 0,
 }
 
 var _rect: ColorRect

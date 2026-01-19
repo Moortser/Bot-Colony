@@ -17,3 +17,9 @@ config/icon="res://icon.svg"
 [display]
 window/size/viewport_width=1024
 window/size/viewport_height=640
+
+[input]
+toggle_inventory={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"ctrl_pressed":false,"shift_pressed":false,"alt_pressed":false,"meta_pressed":false,"keycode":73,"physical_keycode":0,"key_label":0,"unicode":73,"location":0,"echo":false,"pressed":false,"key_modifier_mask":0), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"ctrl_pressed":false,"shift_pressed":false,"alt_pressed":false,"meta_pressed":false,"keycode":4194309,"physical_keycode":0,"key_label":0,"unicode":0,"location":0,"echo":false,"pressed":false,"key_modifier_mask":0)]
+}
