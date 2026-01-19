@@ -13,8 +13,6 @@ const Actions = preload("res://scripts/actions.gd")
 @onready var sim: Sim = $Systems/Sim
 @onready var player: Player = $Units/Prime
 
-@onready var inventory_label: Label = $UI/Panel/VBoxContainer/InventoryLabel
-@onready var furnace_label: Label = $UI/Panel/VBoxContainer/FurnaceLabel
 @onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
 
 var placement_mode := false
@@ -26,7 +24,6 @@ func _ready() -> void:
 	player.position = sim.grid_to_world(start_pos)
 	_setup_resources()
 	inventory_overlay.setup(player.inventory, _request_furnace_placement)
-	_update_ui()
 
 func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("toggle_inventory"):
@@ -34,7 +31,6 @@ func _process(delta: float) -> void:
 	_handle_input()
 	sim.tick(delta)
 	sim.transfer_player_items_to_furnace(player.grid_pos, player.inventory)
-	_update_ui()
 	if inventory_overlay.visible:
 		inventory_overlay.refresh()
 
@@ -91,30 +87,3 @@ func _handle_build_action() -> void:
 		return
 	if Actions.place_furnace(sim, player.grid_pos, player.inventory):
 		placement_mode = false
-
-func _update_ui() -> void:
-	var stone_count: int = int(player.inventory.get(Constants.ITEM_STONE, 0))
-	var coal_count: int = int(player.inventory.get(Constants.ITEM_COAL, 0))
-	var iron_ore_count: int = int(player.inventory.get(Constants.ITEM_IRON_ORE, 0))
-	var copper_ore_count: int = int(player.inventory.get(Constants.ITEM_COPPER_ORE, 0))
-	var iron_plate_count: int = int(player.inventory.get(Constants.ITEM_IRON_PLATE, 0))
-	var copper_plate_count: int = int(player.inventory.get(Constants.ITEM_COPPER_PLATE, 0))
-	inventory_label.text = "Inventory:\n" \
-		+ "Stone: %d\n" % stone_count \
-		+ "Coal: %d\n" % coal_count \
-		+ "Iron ore: %d\n" % iron_ore_count \
-		+ "Copper ore: %d\n" % copper_ore_count \
-		+ "Iron plate: %d\n" % iron_plate_count \
-		+ "Copper plate: %d" % copper_plate_count
-
-	var furnace: Furnace = sim.get_furnace_at(player.grid_pos)
-	if furnace == null:
-		furnace_label.text = "Furnace: (stand on a furnace)"
-		return
-	furnace_label.text = "Furnace:\n" \
-		+ "Fuel (coal): %d\n" % furnace.count(Constants.ITEM_COAL) \
-		+ "Iron ore: %d\n" % furnace.count(Constants.ITEM_IRON_ORE) \
-		+ "Copper ore: %d\n" % furnace.count(Constants.ITEM_COPPER_ORE) \
-		+ "Iron plate: %d\n" % furnace.count(Constants.ITEM_IRON_PLATE) \
-		+ "Copper plate: %d\n" % furnace.count(Constants.ITEM_COPPER_PLATE) \
-		+ "Progress: %.1fs" % furnace.smelt_progress
