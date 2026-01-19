@@ -9,7 +9,7 @@ const SLOT_SIZE := Vector2(48, 48)
 @onready var inventory_grid: GridContainer = $MarginContainer/HBoxContainer/InventoryPanel/InventoryGrid
 @onready var recipes_container: VBoxContainer = $MarginContainer/HBoxContainer/CraftingPanel/CraftingList
 
-var player_inventory: Dictionary
+var player_inventory: Array
 var furnace_request: Callable
 var slot_labels: Array[Label] = []
 
@@ -17,7 +17,7 @@ func _ready() -> void:
 	_set_focus_none()
 	_build_slots()
 
-func setup(inventory: Dictionary, furnace_callback: Callable) -> void:
+func setup(inventory: Array, furnace_callback: Callable) -> void:
 	player_inventory = inventory
 	furnace_request = furnace_callback
 	_update_ui()
@@ -56,14 +56,16 @@ func _update_ui() -> void:
 	_build_recipe_list()
 
 func _update_inventory_slots() -> void:
-	var items := player_inventory.keys()
-	items.sort()
 	for i in range(slot_labels.size()):
 		var label := slot_labels[i]
-		if i < items.size():
-			var item_name: String = str(items[i])
-			var count: int = int(player_inventory.get(item_name, 0))
-			label.text = "%s\n%d" % [item_name.replace("_", " "), count]
+		if i < player_inventory.size():
+			var slot: Dictionary = player_inventory[i] as Dictionary
+			var item_name: String = str(slot.get("item", ""))
+			var count: int = int(slot.get("count", 0))
+			if item_name == "" or count <= 0:
+				label.text = ""
+			else:
+				label.text = "%s\n%d" % [item_name.replace("_", " "), count]
 		else:
 			label.text = ""
 

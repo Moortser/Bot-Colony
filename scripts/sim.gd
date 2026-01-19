@@ -3,8 +3,8 @@ extends Node
 class_name Sim
 
 const Constants = preload("res://scripts/constants.gd")
-const Furnace = preload("res://scripts/furnace.gd")
-const ResourceNode = preload("res://scripts/resource_node.gd")
+const FURNACE_SCENE = preload("res://scripts/furnace.gd")
+const Actions = preload("res://scripts/actions.gd")
 
 var world_size := Constants.WORLD_SIZE
 var resources := {}
@@ -47,14 +47,13 @@ func register_resource(node: ResourceNode) -> void:
 func get_resource_at(pos: Vector2i) -> ResourceNode:
 	return resources.get(pos) as ResourceNode
 
-func mine_resource_at(pos: Vector2i, inventory: Dictionary) -> bool:
+func mine_resource_at(pos: Vector2i, inventory: Array) -> bool:
 	var node: ResourceNode = resources.get(pos)
 	if node == null:
 		return false
 	if not node.mine_one():
 		return false
-	var current_amount: int = int(inventory.get(node.resource_type, 0))
-	inventory[node.resource_type] = current_amount + 1
+	Actions.add_item(inventory, node.resource_type, 1)
 	if node.amount == 0:
 		resources.erase(pos)
 		node.queue_free()
@@ -63,13 +62,10 @@ func mine_resource_at(pos: Vector2i, inventory: Dictionary) -> bool:
 func can_build_furnace_at(pos: Vector2i) -> bool:
 	return not furnaces.has(pos)
 
-func build_furnace_at(pos: Vector2i, inventory: Dictionary) -> bool:
+func build_furnace_at(pos: Vector2i, inventory: Array) -> bool:
 	if not can_build_furnace_at(pos):
 		return false
-	if int(inventory.get(Constants.ITEM_STONE, 0)) < Constants.FURNACE_STONE_COST:
-		return false
-	inventory[Constants.ITEM_STONE] -= Constants.FURNACE_STONE_COST
-	var furnace := Furnace.new()
+	var furnace := FURNACE_SCENE.new()
 	furnace.position = grid_to_world(pos)
 	furnaces[pos] = furnace
 	if world_node:
@@ -79,12 +75,10 @@ func build_furnace_at(pos: Vector2i, inventory: Dictionary) -> bool:
 func get_furnace_at(pos: Vector2i) -> Furnace:
 	return furnaces.get(pos) as Furnace
 
-func transfer_player_items_to_furnace(pos: Vector2i, inventory: Dictionary) -> void:
+func transfer_player_items_to_furnace(pos: Vector2i, inventory: Array) -> void:
 	var furnace: Furnace = furnaces.get(pos)
 	if furnace == null:
 		return
 	for item in [Constants.ITEM_COAL, Constants.ITEM_IRON_ORE, Constants.ITEM_COPPER_ORE]:
-		var item_amount: int = int(inventory.get(item, 0))
-		if item_amount > 0:
-			furnace.add_item(item, item_amount)
-			inventory[item] = 0
+		while Actions.remove_item(inventory, item, 1):
+			furnace.add_item(item, 1)

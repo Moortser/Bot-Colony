@@ -5,22 +5,15 @@ class_name Player
 const Constants = preload("res://scripts/constants.gd")
 
 var grid_pos := Vector2i.ZERO
-var inventory := {
-	Constants.ITEM_IRON_ORE: 0,
-	Constants.ITEM_COPPER_ORE: 0,
-	Constants.ITEM_COAL: 0,
-	Constants.ITEM_STONE: 0,
-	Constants.ITEM_IRON_PLATE: 0,
-	Constants.ITEM_COPPER_PLATE: 0,
-	Constants.ITEM_GEAR: 0,
-	Constants.ITEM_WIRE: 0,
-	Constants.ITEM_CIRCUIT: 0,
-	Constants.ITEM_CHASSIS: 0,
-}
+const SLOT_COUNT := 24
+
+var inventory: Array = []
 
 var _rect: ColorRect
 
 func _ready() -> void:
+	if inventory.is_empty():
+		inventory = _create_empty_inventory()
 	_rect = ColorRect.new()
 	_rect.size = Vector2(Constants.TILE_SIZE, Constants.TILE_SIZE)
 	_rect.color = Color(0.2, 0.7, 1.0)
@@ -38,3 +31,9 @@ func mine(sim: Sim) -> bool:
 
 func _update_world_position() -> void:
 	position = Vector2(grid_pos.x * Constants.TILE_SIZE, grid_pos.y * Constants.TILE_SIZE)
+
+func _create_empty_inventory() -> Array:
+	var slots: Array = []
+	for _i in range(SLOT_COUNT):
+		slots.append({"item": "", "count": 0})
+	return slots
