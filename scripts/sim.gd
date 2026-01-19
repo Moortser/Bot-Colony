@@ -38,8 +38,11 @@ func is_in_bounds(pos: Vector2i) -> bool:
 func grid_to_world(pos: Vector2i) -> Vector2:
 	return Vector2(pos.x * Constants.TILE_SIZE, pos.y * Constants.TILE_SIZE)
 
-func register_resource(node: ResourceNode, pos: Vector2i) -> void:
-	resources[pos] = node
+func world_to_grid(pos: Vector2) -> Vector2i:
+	return Vector2i(int(pos.x / Constants.TILE_SIZE), int(pos.y / Constants.TILE_SIZE))
+
+func register_resource(node: ResourceNode) -> void:
+	resources[world_to_grid(node.position)] = node
 
 func get_resource_at(pos: Vector2i) -> ResourceNode:
 	return resources.get(pos)
@@ -48,10 +51,10 @@ func mine_resource_at(pos: Vector2i, inventory: Dictionary) -> bool:
 	var node: ResourceNode = resources.get(pos)
 	if node == null:
 		return false
-	if not node.take_one():
+	if not node.mine_one():
 		return false
 	inventory[node.resource_type] = inventory.get(node.resource_type, 0) + 1
-	if node.remaining <= 0:
+	if node.amount == 0:
 		resources.erase(pos)
 		node.queue_free()
 	return true

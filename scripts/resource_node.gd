@@ -1,11 +1,10 @@
+class_name ResourceNode
 extends Node2D
 
 const Constants = preload("res://scripts/constants.gd")
 
-class_name ResourceNode
-
-var resource_type := ""
-var remaining := 0
+@export var resource_type: String = ""
+@export var amount: int = 0
 
 var _rect: ColorRect
 
@@ -17,14 +16,16 @@ func _ready() -> void:
 
 func setup(resource: String, amount: int) -> void:
 	resource_type = resource
-	remaining = amount
+	self.amount = amount
 	if _rect:
 		_rect.color = _color_for_resource(resource_type)
 
-func take_one() -> bool:
-	if remaining <= 0:
+func mine_one() -> bool:
+	if amount == -1:
+		return true
+	if amount <= 0:
 		return false
-	remaining -= 1
+	amount -= 1
 	return true
 
 func _color_for_resource(resource: String) -> Color:

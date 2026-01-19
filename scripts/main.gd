@@ -3,6 +3,7 @@ extends Node2D
 const Constants = preload("res://scripts/constants.gd")
 const Sim = preload("res://scripts/sim.gd")
 const ResourceNode = preload("res://scripts/resource_node.gd")
+const Furnace = preload("res://scripts/furnace.gd")
 const Player = preload("res://scripts/player.gd")
 
 @onready var world: Node2D = $World
@@ -50,11 +51,11 @@ func _setup_resources() -> void:
 	_add_resource(Vector2i(10, 2), Constants.ITEM_COPPER_ORE, 20)
 
 func _add_resource(pos: Vector2i, resource: String, amount: int) -> void:
-	var node := ResourceNode.new()
+	var node: ResourceNode = ResourceNode.new()
 	node.setup(resource, amount)
 	node.position = sim.grid_to_world(pos)
 	world.add_child(node)
-	sim.register_resource(node, pos)
+	sim.register_resource(node)
 
 func _on_mine_pressed() -> void:
 	player.mine(sim)
@@ -71,7 +72,7 @@ func _update_ui() -> void:
 		+ "Iron plate: %d\n" % player.inventory.get(Constants.ITEM_IRON_PLATE, 0) \
 		+ "Copper plate: %d" % player.inventory.get(Constants.ITEM_COPPER_PLATE, 0)
 
-	var furnace = sim.get_furnace_at(player.grid_pos)
+	var furnace: Furnace = sim.get_furnace_at(player.grid_pos)
 	if furnace == null:
 		furnace_label.text = "Furnace: (stand on a furnace)"
 		return
