@@ -13,7 +13,7 @@ const ACTIONS_SCRIPT = preload("res://scripts/actions.gd")
 @onready var sim: Sim = $Systems/Sim
 @onready var player: Player = $Units/Prime
 
-@onready var inventory_overlay: InventoryOverlay = $UI/InventoryOverlay
+@onready var inventory_overlay: Control = $UI/InventoryOverlay
 
 var placement_mode := false
 var inventory_open := false
