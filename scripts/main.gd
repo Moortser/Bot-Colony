@@ -1,12 +1,12 @@
 extends Node2D
 
 const Constants = preload("res://scripts/constants.gd")
-const Sim = preload("res://scripts/sim.gd")
-const ResourceNode = preload("res://scripts/resource_node.gd")
-const Furnace = preload("res://scripts/furnace.gd")
-const Player = preload("res://scripts/player.gd")
-const InventoryOverlay = preload("res://scripts/inventory_overlay.gd")
-const Actions = preload("res://scripts/actions.gd")
+const SIM_SCENE = preload("res://scripts/sim.gd")
+const RESOURCE_NODE_SCENE = preload("res://scripts/resource_node.gd")
+const FURNACE_SCENE = preload("res://scripts/furnace.gd")
+const PLAYER_SCENE = preload("res://scripts/player.gd")
+const INVENTORY_OVERLAY_SCENE = preload("res://scripts/inventory_overlay.gd")
+const ACTIONS_SCRIPT = preload("res://scripts/actions.gd")
 
 @onready var world: Node2D = $World
 @onready var units: Node2D = $Units
@@ -20,7 +20,7 @@ var inventory_open := false
 
 func _ready() -> void:
 	sim.world_node = world
-	var start_pos: Vector2i = Vector2i(sim.world_size.x / 2, sim.world_size.y / 2)
+	var start_pos: Vector2i = Vector2i(int(sim.world_size.x / 2.0), int(sim.world_size.y / 2.0))
 	player.grid_pos = start_pos
 	player.position = sim.grid_to_world(start_pos)
 	_setup_resources()
@@ -43,7 +43,7 @@ func _handle_input() -> void:
 	if Input.is_action_just_pressed("ui_cancel"):
 		placement_mode = false
 	if Input.is_action_just_pressed("mine_action"):
-		Actions.mine_at_player(sim, player)
+		ACTIONS_SCRIPT.mine_at_player(sim, player)
 	if Input.is_action_just_pressed("build_action"):
 		_handle_build_action()
 	var direction := Vector2i.ZERO
@@ -65,19 +65,19 @@ func _setup_resources() -> void:
 	_add_resource(Vector2i(10, 2), Constants.ITEM_COPPER_ORE, 20)
 
 func _add_resource(pos: Vector2i, resource: String, amount: int) -> void:
-	var node: ResourceNode = ResourceNode.new()
+	var node: ResourceNode = RESOURCE_NODE_SCENE.new()
 	node.setup(resource, amount)
 	node.position = sim.grid_to_world(pos)
 	world.add_child(node)
 	sim.register_resource(node)
 
 func _request_furnace_placement() -> void:
-	if Actions.arm_furnace_placement(player.inventory):
+	if ACTIONS_SCRIPT.arm_furnace_placement(player.inventory):
 		placement_mode = true
 
 func _handle_build_action() -> void:
 	if not placement_mode:
-		placement_mode = Actions.arm_furnace_placement(player.inventory)
+		placement_mode = ACTIONS_SCRIPT.arm_furnace_placement(player.inventory)
 		return
-	if Actions.place_furnace(sim, player.grid_pos, player.inventory):
+	if ACTIONS_SCRIPT.place_furnace(sim, player.grid_pos, player.inventory):
 		placement_mode = false
