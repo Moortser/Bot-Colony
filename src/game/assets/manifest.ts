@@ -41,6 +41,15 @@ export const SHEETS = [
 
 export const ZOOM_STEPS = [0.5, 1, 2] as const;
 
+export const SPRITE_ORIGINS = {
+  terrain: { x: 0.5, y: 0.5 },
+  bot: { x: 0.5, y: 0.86 },
+  deposit: { x: 0.5, y: 0.82 },
+  building: { x: 0.5, y: 0.82 },
+  cargo: { x: 0.5, y: 1 },
+  activityFx: { x: 0.5, y: 0.75 },
+} as const;
+
 export const SEED_FRAMES = {
   idle: 0,
   deploy0: 1,

@@ -10,6 +10,7 @@ import {
   seedFrameFor,
   SEED_FRAMES,
   SHEETS,
+  SPRITE_ORIGINS,
   storageFrameFor,
   terrainFrameAt,
   TEXTURE_KEYS,
@@ -19,9 +20,6 @@ import { gridToScreen, isoDepth, roundGrid, screenToGrid, TILE_HEIGHT } from "./
 
 const ORIGIN_X = 0;
 const ORIGIN_Y = 96;
-const BOT_ORIGIN_Y = 0.86;
-const DEPOSIT_ORIGIN_Y = 0.82;
-const BUILDING_ORIGIN_Y = 0.82;
 const PINCH_STEP_THRESHOLD = 34;
 
 interface PointLike {
@@ -103,13 +101,13 @@ export class GameScene extends Phaser.Scene {
         const point = this.iso({ x, y });
         this.add
           .sprite(Math.round(point.x), Math.round(point.y), TEXTURE_KEYS.terrain, terrainFrameAt(x, y))
-          .setOrigin(0.5)
+          .setOrigin(SPRITE_ORIGINS.terrain.x, SPRITE_ORIGINS.terrain.y)
           .setDepth(-20_000 + x + y);
         const decalFrame = decalFrameAt(x, y);
         if (decalFrame !== undefined) {
           this.add
             .sprite(Math.round(point.x), Math.round(point.y), TEXTURE_KEYS.decals, decalFrame)
-            .setOrigin(0.5)
+            .setOrigin(SPRITE_ORIGINS.terrain.x, SPRITE_ORIGINS.terrain.y)
             .setDepth(-19_000 + x + y);
         }
       }
@@ -298,7 +296,7 @@ export class GameScene extends Phaser.Scene {
       view.main
         .setTexture(TEXTURE_KEYS.deposits, depositFrameFor(entity))
         .setPosition(Math.round(point.x), Math.round(point.y))
-        .setOrigin(0.5, DEPOSIT_ORIGIN_Y)
+        .setOrigin(SPRITE_ORIGINS.deposit.x, SPRITE_ORIGINS.deposit.y)
         .setDepth(depth)
         .setVisible(true);
       view.cargo.setVisible(false);
@@ -311,8 +309,14 @@ export class GameScene extends Phaser.Scene {
     const existing = this.entityViews.get(entity.id);
     if (existing) return existing;
     const main = this.add.sprite(0, 0, TEXTURE_KEYS.seed, 0);
-    const cargo = this.add.sprite(0, 0, TEXTURE_KEYS.cargo, 0).setOrigin(0.5, 1).setVisible(false);
-    const effect = this.add.sprite(0, 0, TEXTURE_KEYS.activityFx, 0).setOrigin(0.5, 0.75).setVisible(false);
+    const cargo = this.add
+      .sprite(0, 0, TEXTURE_KEYS.cargo, 0)
+      .setOrigin(SPRITE_ORIGINS.cargo.x, SPRITE_ORIGINS.cargo.y)
+      .setVisible(false);
+    const effect = this.add
+      .sprite(0, 0, TEXTURE_KEYS.activityFx, 0)
+      .setOrigin(SPRITE_ORIGINS.activityFx.x, SPRITE_ORIGINS.activityFx.y)
+      .setVisible(false);
     const view = { main, cargo, effect };
     this.entityViews.set(entity.id, view);
     return view;
@@ -337,7 +341,7 @@ export class GameScene extends Phaser.Scene {
     view.main
       .setTexture(TEXTURE_KEYS.seed, frame)
       .setPosition(Math.round(point.x), Math.round(point.y))
-      .setOrigin(0.5, BOT_ORIGIN_Y)
+      .setOrigin(SPRITE_ORIGINS.bot.x, SPRITE_ORIGINS.bot.y)
       .setDepth(depth)
       .setVisible(true);
 
@@ -377,7 +381,7 @@ export class GameScene extends Phaser.Scene {
     view.main
       .setTexture(texture, frame)
       .setPosition(Math.round(point.x), Math.round(point.y))
-      .setOrigin(0.5, BUILDING_ORIGIN_Y)
+      .setOrigin(SPRITE_ORIGINS.building.x, SPRITE_ORIGINS.building.y)
       .setDepth(depth)
       .setVisible(true);
     view.cargo.setVisible(false);
@@ -397,7 +401,7 @@ export class GameScene extends Phaser.Scene {
         this.selectionSprites.push(
           this.add
             .sprite(Math.round(point.x), Math.round(point.y), TEXTURE_KEYS.overlays, OVERLAY_FRAMES.selected)
-            .setOrigin(0.5)
+            .setOrigin(SPRITE_ORIGINS.terrain.x, SPRITE_ORIGINS.terrain.y)
             .setDepth(isoDepth(tile) - 4),
         );
       }
@@ -417,7 +421,7 @@ export class GameScene extends Phaser.Scene {
         this.placementSprites.push(
           this.add
             .sprite(Math.round(point.x), Math.round(point.y), TEXTURE_KEYS.overlays, frame)
-            .setOrigin(0.5)
+            .setOrigin(SPRITE_ORIGINS.terrain.x, SPRITE_ORIGINS.terrain.y)
             .setDepth(isoDepth(tile) + 50),
         );
       }

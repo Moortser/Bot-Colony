@@ -5,6 +5,7 @@ import {
   SEED_FRAMES,
   seedFrameFor,
   SHEETS,
+  SPRITE_ORIGINS,
   storageFrameFor,
   terrainFrameAt,
   ZOOM_STEPS,
@@ -39,6 +40,8 @@ describe("pixel asset manifest", () => {
   it("keeps stable and unique texture keys with declared frames", () => {
     expect(new Set(SHEETS.map((sheet) => sheet.key)).size).toBe(SHEETS.length);
     expect(SHEETS.every((sheet) => sheet.path.endsWith(".png") && sheet.frames > 0)).toBe(true);
+    expect(SPRITE_ORIGINS.bot).toEqual({ x: 0.5, y: 0.86 });
+    expect(SPRITE_ORIGINS.building.y).toBeGreaterThan(0.8);
   });
 
   it("uses discrete scale-safe zoom values", () => {
