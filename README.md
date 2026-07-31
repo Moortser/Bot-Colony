@@ -1,13 +1,14 @@
-# Bot Colony — First Playable Foundation
+# Bot Colony — 1990s Isometric Tycoon Slice
 
 Bot Colony is an isometric browser factory-management prototype about a self-replicating von Neumann probe. The Seed Drone lands with no stored resources and bootstraps a physical iron-production loop from sunlight and local ore.
 
-This implementation uses Phaser 3, strict TypeScript, Vite, a deterministic fixed-step simulation, and a DOM management interface. The simulation owns all authoritative/saveable state; Phaser only renders and translates pointer input.
+This implementation uses Phaser 3, strict TypeScript, Vite, a deterministic fixed-step simulation, committed pixel-sprite atlases, and a DOM tycoon interface. The simulation owns all authoritative/saveable state; Phaser only renders and translates pointer input.
 
 ## Run
 
 ```powershell
 npm.cmd install
+npm.cmd run assets:generate
 npm.cmd run dev
 ```
 
@@ -46,13 +47,21 @@ The exact provisional recipes are shown in the UI and are intentionally compact 
 
 Save and Load store the plain simulation snapshot in browser local storage.
 
+## Visual pipeline
+
+- `docs/art-direction.md` defines the shipped projection, palette, lighting, anchors, animation, UI, and scaling rules.
+- `scripts/generate-pixel-assets.mjs` deterministically rebuilds the original PNG sprite atlases without external art services.
+- `src/game/assets/manifest.ts` owns stable texture keys, frame numbers, anchors, zoom steps, and state-to-frame mapping.
+- `public/assets/sprites/` contains the committed runtime atlases.
+- `docs/screenshots/90s-tycoon-slice/` contains the desktop and mobile visual-QA evidence for the opening slice.
+
 ## Code map
 
 - `src/data/content.ts` — items, recipes, blueprints, research, objectives
 - `src/simulation/` — inventories, tasks, research, production, logistics, programs, save state
-- `src/game/` — isometric projection and Phaser rendering/input
+- `src/game/` — isometric projection, asset manifest, and Phaser sprite rendering/input
 - `src/ui/` — responsive retro-industrial management UI
-- `src/tests/` — projection, inventory, resource flow, research, logistics, and persistence tests
+- `src/tests/` — projection, inventory, resource flow, research, logistics, persistence, and visual-state tests
 
 ## Repository transition
 

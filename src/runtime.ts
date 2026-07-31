@@ -9,12 +9,14 @@ export interface RuntimeState {
   hoverTile?: { x: number; y: number };
   placementValid: boolean;
   placementReason: string;
+  selectionVersion: number;
   refreshUi: () => void;
 }
 
 export const runtime: RuntimeState = {
   simulation: new Simulation(),
   selectedId: "bot-seed",
+  selectionVersion: 0,
   placementValid: false,
   placementReason: "",
   refreshUi: () => undefined,
@@ -26,5 +28,6 @@ export function replaceSimulation(simulation: Simulation): void {
   runtime.placementType = undefined;
   runtime.placementTile = undefined;
   runtime.hoverTile = undefined;
+  runtime.selectionVersion += 1;
   runtime.refreshUi();
 }
