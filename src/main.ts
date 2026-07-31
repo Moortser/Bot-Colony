@@ -8,11 +8,12 @@ new AppUi();
 new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game-canvas",
-  backgroundColor: "#101718",
+  backgroundColor: "#493426",
   render: {
-    antialias: true,
-    pixelArt: false,
-    roundPixels: false,
+    antialias: false,
+    antialiasGL: false,
+    pixelArt: true,
+    roundPixels: true,
   },
   scale: {
     mode: Phaser.Scale.RESIZE,
