@@ -1,4 +1,4 @@
-import { BOT_FRAMES, BUILDINGS, OBJECTIVES, RECIPES, RESEARCH } from "../data/content";
+import { BOT_FRAMES, BUILDINGS, ITEMS, OBJECTIVES, RECIPES, RESEARCH } from "../data/content";
 import {
   addItem,
   addItems,
@@ -11,7 +11,7 @@ import {
   transferItem,
 } from "./inventory";
 import { CHARGER_BUFFER_CAPACITY, CHARGER_REGEN_RATE, CHARGE_RATE, batteryPercent, reachableChargingStations } from "./energy/charging";
-import { availableOutput, completeReservation, releaseReservation } from "./logistics/reservations";
+import { availableOutput, completeReservation, releaseReservation, reservedAtSource } from "./logistics/reservations";
 import { clearBotPath, followBotPath, isBotAtInteraction, planBotPath } from "./movement/pathMovement";
 import { resolveInteractionPath } from "./pathfinding/grid";
 import { BASIC_BRAIN_COMMANDS, PROGRAM_TEMPLATES, createProgramCommand } from "./programs/templates";
@@ -87,6 +87,8 @@ function createInitialState(): SimulationState {
       progress: 0,
       reservedItemRefs: [],
       blockingReason: "",
+      priority: "normal",
+      automatedDeliveries: 0,
     };
   }
 
@@ -118,7 +120,7 @@ function createInitialState(): SimulationState {
   };
 
   return {
-    version: 2,
+    version: 3,
     tick: 0,
     gameTime: 0,
     speed: 1,
@@ -150,6 +152,9 @@ function createInitialState(): SimulationState {
       minerRunning: false,
       observedOutputFull: false,
       autonomousLoop: false,
+      delegatedConstruction: false,
+      delegatedResearch: false,
+      projectCoordination: false,
     },
     notifications: [
       {
@@ -160,39 +165,105 @@ function createInitialState(): SimulationState {
       },
     ],
     debug: false,
+    releaseEvents: [],
   };
 }
 
 function normalizeState(snapshot: unknown): SimulationState {
   const state = clone(snapshot) as SimulationState;
-  if (state.version === 2) return state;
-  state.version = 2;
-  state.worldRevision = 0;
-  state.automation = { ironIngotsDelivered: 0, productiveSeconds: 0, completed: false };
-  state.flags.chargingStationBuilt = false;
-  state.logisticsRequests = {};
-  state.reservations = {};
-  for (const deposit of Object.values(state.deposits)) deposit.reservedBy = undefined;
-  for (const bot of Object.values(state.bots)) {
-    bot.path = { tiles: [], currentIndex: 0, status: "idle", repathReason: "Migrated save", worldRevision: 0 };
-    if (!bot.program) continue;
-    const template = PROGRAM_TEMPLATES[bot.program.templateId];
-    bot.program = {
-      id: `program-${state.nextId++}`,
-      templateId: bot.program.templateId,
-      name: template.name,
-      commands: clone(template.commands),
-      running: false,
-      instructionPointer: 0,
-      currentCommandId: template.commands[0]?.id,
-      runtime: { elapsed: 0, phase: "idle", zeroDurationTransitions: 0, lastTransitionTick: state.tick },
-      blockingReason: "Migrated program is stopped; inspect and restart it",
-      loopCount: 0,
-      currentStep: 0,
-      blockedReason: "Migrated program is stopped; inspect and restart it",
-      phase: "idle",
-    };
+  const previousVersion = Number((state as SimulationState & { version?: number }).version ?? 1);
+  if (previousVersion < 2) {
+    state.worldRevision = 0;
+    state.automation = { ironIngotsDelivered: 0, productiveSeconds: 0, completed: false };
+    state.flags.chargingStationBuilt = false;
+    state.logisticsRequests = {};
+    state.reservations = {};
+    for (const deposit of Object.values(state.deposits)) deposit.reservedBy = undefined;
+    for (const bot of Object.values(state.bots)) {
+      bot.path = { tiles: [], currentIndex: 0, status: "idle", repathReason: "Migrated save", worldRevision: 0 };
+      if (!bot.program) continue;
+      const template = PROGRAM_TEMPLATES[bot.program.templateId];
+      bot.program = {
+        id: `program-${state.nextId++}`,
+        templateId: bot.program.templateId,
+        name: template.name,
+        commands: clone(template.commands),
+        running: false,
+        instructionPointer: 0,
+        currentCommandId: template.commands[0]?.id,
+        runtime: { elapsed: 0, phase: "idle", zeroDurationTransitions: 0, lastTransitionTick: state.tick },
+        blockingReason: "Migrated program is stopped; inspect and restart it",
+        loopCount: 0,
+        currentStep: 0,
+        blockedReason: "Migrated program is stopped; inspect and restart it",
+        phase: "idle",
+      };
+    }
   }
+  state.version = 3;
+  state.releaseEvents ??= [];
+  state.flags.delegatedConstruction ??= false;
+  state.flags.delegatedResearch ??= false;
+  state.flags.projectCoordination ??= false;
+  if (previousVersion < 3) {
+    for (const building of Object.values(state.buildings)) {
+      building.projectPriority ??= "normal";
+      building.cancelled ??= false;
+      building.automatedConstructionDeliveries ??= 0;
+    }
+    for (const id of Object.keys(RESEARCH) as ResearchId[]) {
+      state.research[id] ??= {
+        id,
+        completed: false,
+        progress: 0,
+        reservedItemRefs: [],
+        blockingReason: "",
+        priority: "normal",
+        automatedDeliveries: 0,
+      };
+    }
+    for (const node of Object.values(state.research)) {
+      node.priority ??= "normal";
+      node.automatedDeliveries ??= 0;
+    }
+    for (const request of Object.values(state.logisticsRequests)) {
+      request.priority ??= "normal";
+      request.createdAt ??= state.gameTime;
+      request.requiredQuantity ??= request.quantity;
+      request.deliveredQuantity ??= 0;
+      request.inTransitQuantity ??= 0;
+      request.blockingReason ??= "";
+    }
+  }
+  for (const reservation of Object.values(state.reservations)) {
+    if (previousVersion < 3) reservation.sourceInventory ??= state.buildings[reservation.sourceId]?.type === "storage" ? "input" : "output";
+    const bot = state.bots[reservation.botId];
+    const source = state.buildings[reservation.sourceId];
+    const destination = state.buildings[reservation.destinationId];
+    const request = state.logisticsRequests[reservation.requestId];
+    const sourceInventory = source
+      ? reservation.sourceInventory === "input" || (!reservation.sourceInventory && source.type === "storage")
+        ? source.input
+        : source.output
+      : undefined;
+    const sourceQuantityInvalid =
+      reservation.state === "reserved" &&
+      (!sourceInventory || itemCount(sourceInventory, reservation.itemId) < reservation.quantity);
+    const cargoQuantityInvalid =
+      reservation.state === "inTransit" &&
+      !!bot &&
+      itemCount(bot.inventory, reservation.itemId) < reservation.quantity - reservation.deliveredQuantity;
+    if (!bot || !destination || !request || sourceQuantityInvalid || cargoQuantityInvalid) {
+      if (request) {
+        request.claimedBy = undefined;
+        request.reservedQuantity = 0;
+        request.state = request.active ? "open" : "invalid";
+      }
+      delete state.reservations[reservation.id];
+      state.releaseEvents.push(`restore released invalid ${reservation.id}`);
+    }
+  }
+  state.releaseEvents = state.releaseEvents.slice(-20);
   return state;
 }
 
@@ -324,9 +395,6 @@ export class Simulation {
   public canPlaceBuilding(type: BuildingTypeId, x: number, y: number): { valid: boolean; reason: string } {
     const definition = BUILDINGS[type];
     if (!this.state.unlocks.includes(definition.unlockId)) return { valid: false, reason: "Blueprint locked" };
-    if (!canReserve(this.seed.inventory, this.seed.reservedInventory, definition.cost)) {
-      return { valid: false, reason: "Required construction materials must be in Seed cargo" };
-    }
     if (x < 1 || y < 1 || x + definition.footprint.width >= this.state.mapSize - 1 || y + definition.footprint.height >= this.state.mapSize - 1) {
       return { valid: false, reason: "Footprint is outside the surveyed area" };
     }
@@ -367,24 +435,15 @@ export class Simulation {
       blockingReason: "Awaiting Seed Drone and reserved materials",
       cradleQueued: false,
       chargingProgress: 0,
+      projectPriority: "normal",
+      cancelled: false,
+      automatedConstructionDeliveries: 0,
     };
     this.state.buildings[id] = building;
     this.state.worldRevision += 1;
-    addItems(this.seed.reservedInventory, definition.cost);
-    if (!this.beginMove(this.seed, building, "construction", {
-      kind: "building",
-      label: `Constructing ${definition.name}`,
-      targetId: id,
-      progress: 0,
-      duration: definition.buildTime,
-      payload: { ...definition.cost },
-    })) {
-      removeItems(this.seed.reservedInventory, definition.cost);
-      delete this.state.buildings[id];
-      this.state.worldRevision += 1;
-      return undefined;
-    }
-    this.seed.status = `Delivering reserved materials to ${definition.name}`;
+    this.refreshRequests();
+    building.status = "Awaiting project materials";
+    building.blockingReason = "Supply manually or assign Colony Supplier";
     this.notify(`CONSTRUCTION MARKER // ${definition.name}`, "info");
     return id;
   }
@@ -409,7 +468,7 @@ export class Simulation {
 
   public commandConstructSite(buildingId: string): boolean {
     const building = this.state.buildings[buildingId];
-    if (!building || building.complete) return false;
+    if (!building || building.complete || building.cancelled) return false;
     const cost = BUILDINGS[building.type].cost;
     const remaining: Inventory = {};
     for (const [itemId, quantity] of Object.entries(cost) as Array<[ItemId, number]>) {
@@ -417,7 +476,7 @@ export class Simulation {
       if (missing > 0) remaining[itemId] = missing;
     }
     if (!canReserve(this.seed.inventory, this.seed.reservedInventory, remaining)) {
-      return this.reject(this.seed, "Missing construction materials in Seed cargo");
+      return this.reject(this.seed, "Site is waiting for delivered materials; carry every missing item or assign Colony Supplier");
     }
     this.cancelBotTask(this.seed);
     addItems(this.seed.reservedInventory, remaining);
@@ -432,6 +491,34 @@ export class Simulation {
       removeItems(this.seed.reservedInventory, remaining);
       return this.reject(this.seed, this.seed.path.repathReason);
     }
+    building.manualProjectDelivery = { ...remaining };
+    this.refreshRequests();
+    return true;
+  }
+
+  public cancelConstructionSite(buildingId: string): boolean {
+    const building = this.state.buildings[buildingId];
+    if (!building || building.complete || building.cancelled) return false;
+    this.releaseProjectClaims(building.id, "construction site cancelled");
+    if (this.seed.task.targetId === building.id) this.cancelBotTask(this.seed);
+    addItems(building.output, building.constructionInventory);
+    building.constructionInventory = {};
+    building.manualProjectDelivery = {};
+    building.cancelled = true;
+    building.status = "Cancelled: Salvage available";
+    building.blockingReason = inventoryTotal(building.output) > 0 ? "Delivered materials moved to recoverable output" : "No delivered materials";
+    this.state.worldRevision += 1;
+    this.refreshRequests();
+    this.notify(`${building.name.toUpperCase()} // Site cancelled safely`, "warning");
+    return true;
+  }
+
+  public setProjectPriority(buildingId: string, priority: "high" | "normal" | "low"): boolean {
+    const building = this.state.buildings[buildingId];
+    if (!building || !this.state.unlocks.includes("project.priority")) return false;
+    building.projectPriority = priority;
+    if (building.activeResearchId) this.state.research[building.activeResearchId].priority = priority;
+    this.refreshRequests();
     return true;
   }
 
@@ -443,7 +530,7 @@ export class Simulation {
           0,
         )
       : 0;
-    if (!building?.complete || available === 0) {
+    if ((!building?.complete && !building?.cancelled) || available === 0) {
       return this.reject(this.seed, "No finished items available");
     }
     this.cancelBotTask(this.seed);
@@ -483,17 +570,45 @@ export class Simulation {
       return this.reject(seed, "Prerequisite research is incomplete");
     }
     if (bench.activeResearchId) return this.reject(seed, "Research Bench is already assigned");
-    const required = Object.fromEntries(definition.requiredItems.map((itemId) => [itemId, 1])) as Inventory;
+    node.assignedBenchId = bench.id;
+    node.assignedOperatorId = undefined;
+    node.priority = bench.projectPriority ?? "normal";
+    node.blockingReason = "Awaiting physical example delivery";
+    bench.activeResearchId = researchId;
+    bench.operatorId = undefined;
+    bench.status = `Awaiting examples: ${definition.name}`;
+    bench.blockingReason = node.blockingReason;
+    this.refreshRequests();
+    const required = Object.fromEntries(
+      definition.requiredItems
+        .filter((itemId) => itemCount(bench.researchHold, itemId) === 0)
+        .map((itemId) => [itemId, 1]),
+    ) as Inventory;
+    if (canReserve(seed.inventory, seed.reservedInventory, required)) return this.commandOperateResearch(bench.id);
+    this.notify(`RESEARCH PROJECT // ${definition.name} awaiting examples`, "info");
+    return true;
+  }
+
+  public commandOperateResearch(benchId: string): boolean {
+    const bench = this.state.buildings[benchId];
+    const seed = this.seed;
+    const researchId = bench?.activeResearchId;
+    if (!bench?.complete || bench.type !== "researchBench" || !researchId) return this.reject(seed, "No selected research project");
+    const definition = RESEARCH[researchId];
+    const node = this.state.research[researchId];
+    const required = Object.fromEntries(
+      definition.requiredItems
+        .filter((itemId) => itemCount(bench.researchHold, itemId) === 0)
+        .map((itemId) => [itemId, 1]),
+    ) as Inventory;
     if (!canReserve(seed.inventory, seed.reservedInventory, required)) {
-      node.blockingReason = "Required example items must be together in Seed cargo";
+      node.blockingReason = "Awaiting delivered examples or missing examples in Seed cargo";
       return this.reject(seed, node.blockingReason);
     }
     this.cancelBotTask(seed);
     addItems(seed.reservedInventory, required);
-    node.assignedBenchId = bench.id;
     node.assignedOperatorId = seed.id;
-    node.blockingReason = "Operator travelling with reserved items";
-    bench.activeResearchId = researchId;
+    node.blockingReason = inventoryTotal(required) > 0 ? "Operator travelling with physical examples" : "Operator travelling to ready bench";
     bench.operatorId = seed.id;
     bench.status = `Preparing ${definition.name}`;
     bench.blockingReason = node.blockingReason;
@@ -506,12 +621,12 @@ export class Simulation {
       payload: required,
     })) {
       removeItems(seed.reservedInventory, required);
-      node.assignedBenchId = undefined;
       node.assignedOperatorId = undefined;
-      bench.activeResearchId = undefined;
       bench.operatorId = undefined;
       return this.reject(seed, seed.path.repathReason);
     }
+    bench.manualProjectDelivery = { ...required };
+    this.refreshRequests();
     return true;
   }
 
@@ -519,6 +634,7 @@ export class Simulation {
     const bench = this.state.buildings[benchId];
     if (!bench?.activeResearchId) return false;
     const node = this.state.research[bench.activeResearchId];
+    this.releaseProjectClaims(bench.id, "research cancelled");
     for (const itemId of RESEARCH[node.id].requiredItems) {
       if (itemCount(bench.researchHold, itemId) > 0) {
         addItem(bench.researchHold, itemId, -1);
@@ -531,6 +647,7 @@ export class Simulation {
     node.blockingReason = "Cancelled; example items returned to bench output";
     bench.activeResearchId = undefined;
     bench.operatorId = undefined;
+    bench.manualProjectDelivery = {};
     bench.status = "Idle";
     bench.blockingReason = "No research selected";
     if (this.seed.task.targetId === benchId) this.cancelBotTask(this.seed);
@@ -765,7 +882,9 @@ export class Simulation {
     }
     if (bot.task.kind === "building") {
       const building = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
-      if (!building) return this.setIdle(bot, "Construction cancelled", "Destination invalid");
+      if (!building || building.cancelled || building.complete) {
+        return this.setIdle(bot, "Construction cancelled", building?.cancelled ? "Site was cancelled" : "Destination invalid");
+      }
       bot.task.progress += delta;
       bot.battery = Math.max(0, bot.battery - 0.45 * delta);
       building.constructionProgress = Math.min(1, bot.task.progress / bot.task.duration);
@@ -779,6 +898,7 @@ export class Simulation {
           building.type === "furnace" ? "No input" : building.type === "researchBench" ? "No research selected" : "";
         building.constructionInventory = {};
         this.markBuildingFlag(building.type);
+        if ((building.automatedConstructionDeliveries ?? 0) > 0) this.state.flags.delegatedConstruction = true;
         this.notify(`${building.name.toUpperCase()} // Construction complete`, "success");
         this.setIdle(bot, `${building.name} construction complete`, "");
       }
@@ -827,13 +947,20 @@ export class Simulation {
     }
     if (bot.task.kind === "building") {
       const building = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
-      if (!building || !bot.task.payload || !removeItems(bot.inventory, bot.task.payload)) {
+      if (!building || building.cancelled || building.complete || !bot.task.payload || !removeItems(bot.inventory, bot.task.payload)) {
         this.cancelBotTask(bot);
         this.reject(bot, "Reserved construction materials are no longer available");
         return;
       }
       removeItems(bot.reservedInventory, bot.task.payload);
       addItems(building.constructionInventory, bot.task.payload);
+      building.manualProjectDelivery = {};
+      if (!hasItems(building.constructionInventory, BUILDINGS[building.type].cost)) {
+        building.status = "Awaiting project materials";
+        building.blockingReason = "Some required items are still missing";
+        this.setIdle(bot, "Construction supply delivered", "Site is not fully supplied");
+        return;
+      }
       bot.task.progress = building.constructionProgress * bot.task.duration;
       building.status = "Construction in progress";
       bot.status = bot.task.label;
@@ -849,6 +976,7 @@ export class Simulation {
       }
       removeItems(bot.reservedInventory, bot.task.payload);
       addItems(bench.researchHold, bot.task.payload);
+      bench.manualProjectDelivery = {};
       const node = this.state.research[researchId];
       node.reservedItemRefs = RESEARCH[researchId].requiredItems.map((itemId) => ({
         itemId,
@@ -1009,9 +1137,9 @@ export class Simulation {
       const operator = bench.operatorId ? this.state.bots[bench.operatorId] : undefined;
       const allPresent = definition.requiredItems.every((itemId) => itemCount(bench.researchHold, itemId) === 1);
       if (!allPresent) {
-        node.blockingReason = "A reserved example item is missing";
+        node.blockingReason = "Awaiting physical example delivery";
       } else if (!operator || operator.task.kind !== "researching" || operator.task.targetId !== bench.id) {
-        node.blockingReason = "Assigned operator is not at the bench";
+        node.blockingReason = "Ready: Awaiting operator";
       } else if (operator.battery <= 1) {
         node.blockingReason = "Operator has insufficient power";
       } else if (bench.power <= 1) {
@@ -1023,7 +1151,7 @@ export class Simulation {
         bench.power = Math.max(0, bench.power - definition.energyPerSecond * 0.5 * delta);
       }
       bench.blockingReason = node.blockingReason;
-      bench.status = node.blockingReason ? `Paused: ${node.blockingReason}` : `Researching ${definition.name}`;
+      bench.status = node.blockingReason === "Ready: Awaiting operator" ? node.blockingReason : node.blockingReason ? `Paused: ${node.blockingReason}` : `Researching ${definition.name}`;
       if (node.progress >= definition.duration) this.completeResearch(bench, node);
     }
   }
@@ -1040,6 +1168,10 @@ export class Simulation {
     node.blockingReason = "";
     for (const unlockId of definition.unlockIds) {
       if (!this.state.unlocks.includes(unlockId)) this.state.unlocks.push(unlockId);
+    }
+    if (node.id === "projectCoordination") {
+      this.state.flags.projectCoordination = true;
+      this.state.flags.delegatedResearch = (node.automatedDeliveries ?? 0) >= definition.requiredItems.length;
     }
     bench.activeResearchId = undefined;
     bench.operatorId = undefined;
@@ -1100,6 +1232,20 @@ export class Simulation {
         return this.executeClaimSupplyRequest(bot, program, command);
       case "claimOutputRequest":
         return this.executeClaimOutputRequest(bot, program, command);
+      case "claimProjectSupplyRequest":
+        return this.executeClaimProjectSupplyRequest(bot, program, command);
+      case "moveToRequestSource": {
+        const reservation = this.currentReservation(program);
+        if (!reservation || reservation.state !== "reserved") return this.blockProgram(bot, "No reserved project source", false);
+        program.currentTargetId = reservation.sourceId;
+        return this.executeMoveToTarget(bot, program, delta);
+      }
+      case "moveToRequestDestination": {
+        const reservation = this.currentReservation(program);
+        if (!reservation || reservation.state !== "inTransit") return this.blockProgram(bot, "No in-transit project delivery", false);
+        program.currentTargetId = reservation.destinationId;
+        return this.executeMoveToTarget(bot, program, delta);
+      }
       case "collectReserved":
         return this.executeCollectReserved(bot, program);
       case "deliverReserved":
@@ -1257,6 +1403,96 @@ export class Simulation {
     return this.blockProgram(bot, "Output already reserved or unreachable", true);
   }
 
+  private executeClaimProjectSupplyRequest(
+    bot: BotEntity,
+    program: BotProgram,
+    command: ProgramCommand,
+  ): "complete" | "blocked" {
+    const freeCargo = bot.inventoryCapacity - inventoryTotal(bot.inventory);
+    if (freeCargo <= 0) return this.blockProgram(bot, "Cargo incompatible or full", true);
+    const allProjectRequests = Object.values(this.state.logisticsRequests).filter(
+      (request) => request.active && (request.type === "construction" || request.type === "researchItem"),
+    );
+    if (allProjectRequests.length === 0) return this.blockProgram(bot, "No project requests", true);
+    const filter = command.parameters.projectFilter ?? "any";
+    const matching = allProjectRequests.filter(
+      (request) =>
+        (request.state === "open" || request.claimedBy === bot.id) &&
+        (filter === "any" || request.projectKind === filter) &&
+        (!command.parameters.itemId || request.itemId === command.parameters.itemId) &&
+        request.quantity > 0,
+    );
+    if (matching.length === 0) return this.blockProgram(bot, "No matching request", true);
+
+    const priorityRank = { high: 0, normal: 1, low: 2 } as const;
+    const candidates = matching
+      .map((request) => {
+        const destination = this.state.buildings[request.buildingId];
+        if (!destination || destination.cancelled) return undefined;
+        const destinationInteraction = request.type === "construction" ? "construction" : "input";
+        const sources = Object.values(this.state.buildings)
+          .flatMap((source) => {
+            const sourceInventory = source.complete && source.type === "storage" ? "input" as const : "output" as const;
+            if ((!source.complete && !source.cancelled) || source.id === destination.id) return [];
+            const physical = itemCount(source[sourceInventory], request.itemId);
+            const available = Math.max(0, physical - reservedAtSource(this.state, source.id, request.itemId));
+            if (available <= 0) return [];
+            const sourceRoute = resolveInteractionPath(this.state, bot.position, source, "output");
+            if (sourceRoute.path.length === 0 || !sourceRoute.interactionDestination) return [];
+            const destinationRoute = resolveInteractionPath(
+              this.state,
+              sourceRoute.interactionDestination,
+              destination,
+              destinationInteraction,
+            );
+            if (destinationRoute.path.length === 0) return [];
+            return [{
+              source,
+              sourceInventory,
+              available,
+              totalPathCost: sourceRoute.path.length + destinationRoute.path.length,
+            }];
+          })
+          .sort((a, b) => b.available - a.available || a.totalPathCost - b.totalPathCost || a.source.id.localeCompare(b.source.id));
+        const source = sources[0];
+        return source ? { request, destination, ...source } : undefined;
+      })
+      .filter((candidate): candidate is NonNullable<typeof candidate> => !!candidate)
+      .sort(
+        (a, b) =>
+          priorityRank[a.request.priority ?? "normal"] - priorityRank[b.request.priority ?? "normal"] ||
+          (a.request.createdAt ?? 0) - (b.request.createdAt ?? 0) ||
+          a.totalPathCost - b.totalPathCost ||
+          a.request.id.localeCompare(b.request.id),
+      );
+    const selected = candidates[0];
+    if (!selected) {
+      const anyPhysical = Object.values(this.state.buildings).some(
+        (source) => itemCount(source.type === "storage" ? source.input : source.output, matching[0]!.itemId) > 0,
+      );
+      const anyAvailable = Object.values(this.state.buildings).some((source) => {
+        const inventory = source.type === "storage" ? source.input : source.output;
+        return itemCount(inventory, matching[0]!.itemId) - reservedAtSource(this.state, source.id, matching[0]!.itemId) > 0;
+      });
+      return this.blockProgram(bot, anyPhysical && !anyAvailable ? "All matching quantities reserved" : anyPhysical ? "No reachable source" : "No available source", true);
+    }
+    const quantity = Math.min(selected.request.quantity, selected.available, freeCargo);
+    if (!this.claimRequest(selected.request, bot, selected.source.id, selected.destination.id, quantity)) {
+      return this.blockProgram(bot, "All matching quantities reserved", true);
+    }
+    const reservationId = `reservation:${selected.request.id}:${bot.id}`;
+    const reservation = this.state.reservations[reservationId];
+    if (!reservation) return this.blockProgram(bot, "Reservation creation failed", false);
+    reservation.sourceInventory = selected.sourceInventory;
+    selected.request.state = "awaitingPickup";
+    selected.request.blockingReason = "Supplier travelling to reserved source";
+    program.currentRequestId = selected.request.id;
+    program.currentReservationId = reservationId;
+    program.currentTargetId = selected.source.id;
+    clearBotPath(bot, "Project source claimed");
+    return "complete";
+  }
+
   private executeCollectReserved(bot: BotEntity, program: BotProgram): "complete" | "blocked" {
     const reservation = this.currentReservation(program);
     if (!reservation || reservation.state !== "reserved") return this.blockProgram(bot, "No active reservation", false);
@@ -1264,16 +1500,19 @@ export class Simulation {
     const source = this.state.buildings[reservation.sourceId];
     if (!request || !source) return this.blockProgram(bot, "Source invalid", false);
     if (!isBotAtInteraction(bot) || bot.path.targetId !== source.id) return this.blockProgram(bot, "Not at pickup", false);
-    const available = itemCount(source.output, reservation.itemId);
+    const sourceInventory = reservation.sourceInventory === "input" ? source.input : source.output;
+    const available = itemCount(sourceInventory, reservation.itemId);
     if (available <= 0) return this.blockProgram(bot, "Reserved items missing", false);
     if (inventoryTotal(bot.inventory) >= bot.inventoryCapacity) return this.blockProgram(bot, "Cargo full", false);
-    const moved = transferItem(source.output, bot.inventory, bot.inventoryCapacity, reservation.itemId, reservation.quantity);
+    const moved = transferItem(sourceInventory, bot.inventory, bot.inventoryCapacity, reservation.itemId, reservation.quantity);
     if (moved <= 0) return this.blockProgram(bot, "Reserved items missing", false);
     reservation.quantity = moved;
     reservation.collectedQuantity = moved;
     reservation.state = "inTransit";
     request.state = "inTransit";
-    request.quantity = moved;
+    request.reservedQuantity = 0;
+    request.inTransitQuantity = moved;
+    request.blockingReason = "Reserved material is physically in transit";
     program.currentTargetId = reservation.destinationId;
     clearBotPath(bot, "Pickup complete; destination selected");
     bot.battery = Math.max(0, bot.battery - moved * 0.15);
@@ -1288,10 +1527,31 @@ export class Simulation {
     if (!request || !destination) return this.blockProgram(bot, "Destination invalid", false);
     if (!isBotAtInteraction(bot) || bot.path.targetId !== destination.id) return this.blockProgram(bot, "Not at destination", false);
     if (itemCount(bot.inventory, reservation.itemId) <= 0) return this.blockProgram(bot, "Cargo no longer contains the reserved item", false);
-    const capacity = BUILDINGS[destination.type].inputCapacity;
-    const moved = transferItem(bot.inventory, destination.input, capacity, reservation.itemId, reservation.quantity);
+    let moved = 0;
+    if (request.type === "construction") {
+      moved = transferItem(
+        bot.inventory,
+        destination.constructionInventory,
+        inventoryTotal(BUILDINGS[destination.type].cost),
+        reservation.itemId,
+        reservation.quantity,
+      );
+    } else if (request.type === "researchItem") {
+      moved = transferItem(bot.inventory, destination.researchHold, BUILDINGS.researchBench.inputCapacity, reservation.itemId, reservation.quantity);
+    } else {
+      moved = transferItem(bot.inventory, destination.input, BUILDINGS[destination.type].inputCapacity, reservation.itemId, reservation.quantity);
+    }
     if (moved <= 0) return this.blockProgram(bot, "Destination full", true);
     reservation.deliveredQuantity += moved;
+    request.deliveredQuantity = (request.deliveredQuantity ?? 0) + moved;
+    request.inTransitQuantity = Math.max(0, (request.inTransitQuantity ?? 0) - moved);
+    if (request.type === "construction") {
+      destination.automatedConstructionDeliveries = (destination.automatedConstructionDeliveries ?? 0) + moved;
+    }
+    if (request.type === "researchItem" && destination.activeResearchId) {
+      const node = this.state.research[destination.activeResearchId];
+      node.automatedDeliveries = (node.automatedDeliveries ?? 0) + moved;
+    }
     if (reservation.itemId === "ironIngot" && destination.type === "storage") {
       this.state.automation.ironIngotsDelivered += moved;
       this.state.automation.lastDeliveryAt = this.state.gameTime;
@@ -1303,6 +1563,7 @@ export class Simulation {
     program.currentTargetId = undefined;
     clearBotPath(bot, "Delivery complete");
     bot.battery = Math.max(0, bot.battery - moved * 0.12);
+    this.refreshRequests();
     return "complete";
   }
 
@@ -1431,6 +1692,11 @@ export class Simulation {
     if (reservation?.sourceId === target.id && reservation.state === "reserved" && reservation.sourceId !== reservation.botId) {
       return "output" as const;
     }
+    if (reservation?.destinationId === target.id && reservation.state === "inTransit") {
+      const request = this.state.logisticsRequests[reservation.requestId];
+      if (request?.type === "construction") return "construction" as const;
+      return "input" as const;
+    }
     return "input" as const;
   }
 
@@ -1477,26 +1743,43 @@ export class Simulation {
 
   private refreshRequests(): void {
     const activeIds = new Set<string>();
-    for (const building of Object.values(this.state.buildings)) {
-      if (!building.complete) {
-        for (const [itemId, quantity] of Object.entries(BUILDINGS[building.type].cost) as Array<[ItemId, number]>) {
+    for (const building of Object.values(this.state.buildings).sort((a, b) => a.id.localeCompare(b.id))) {
+      if (!building.complete && !building.cancelled) {
+        let ready = true;
+        for (const [itemId, required] of Object.entries(BUILDINGS[building.type].cost) as Array<[ItemId, number]>) {
           const delivered = itemCount(building.constructionInventory, itemId);
-          if (quantity > delivered) {
-            const id = `request:${building.id}:construction:${itemId}`;
+          const id = `request:${building.id}:construction:${itemId}`;
+          const reserved = this.requestQuantityByState(id, "reserved") + itemCount(building.manualProjectDelivery ?? {}, itemId);
+          const inTransit = this.requestQuantityByState(id, "inTransit");
+          const missing = Math.max(0, required - delivered - reserved - inTransit);
+          ready &&= delivered >= required;
+          if (delivered < required) {
             activeIds.add(id);
-            this.upsertRequest({
-              id,
-              type: "construction",
-              buildingId: building.id,
-              itemId,
-              quantity: quantity - delivered,
-              reservedQuantity: 0,
-              state: "open",
-              active: true,
-              label: `Construction needs ${quantity - delivered} ${itemId}`,
-            });
+            if (missing > 0 || this.state.logisticsRequests[id]) {
+              this.upsertRequest({
+                id,
+                type: "construction",
+                projectKind: "construction",
+                buildingId: building.id,
+                destinationId: building.id,
+                itemId,
+                quantity: missing,
+                requiredQuantity: required,
+                deliveredQuantity: delivered,
+                reservedQuantity: reserved,
+                inTransitQuantity: inTransit,
+                priority: building.projectPriority ?? "normal",
+                createdAt: this.state.gameTime,
+                state: "open",
+                active: true,
+                blockingReason: missing > 0 ? "Awaiting public stock and supplier claim" : "Reserved or in transit",
+                label: `${ITEMS[itemId]?.shortName ?? itemId}: ${delivered}/${required} delivered`,
+              });
+            }
           }
         }
+        building.status = ready ? "Ready: Awaiting constructor" : "Awaiting project materials";
+        building.blockingReason = ready ? "Select Supply and Construct to assign the Seed" : "Missing, reserved, and in-transit items are tracked below";
         continue;
       }
       if (building.type === "furnace") {
@@ -1516,42 +1799,56 @@ export class Simulation {
             label: `Needs ${needed} Iron Ore`,
           });
         }
-        const available = itemCount(building.output, "ironIngot");
-        if (available > 0) {
-          const id = `request:${building.id}:output:ironIngot`;
-          activeIds.add(id);
-          this.upsertRequest({
-            id,
-            type: "buildingOutput",
-            buildingId: building.id,
-            itemId: "ironIngot",
-            quantity: available,
-            reservedQuantity: 0,
-            state: "open",
-            sourceId: building.id,
-            active: true,
-            label: `${available} Iron Ingot ready`,
-          });
-        }
       }
       if (building.type === "researchBench" && building.activeResearchId) {
-        for (const itemId of RESEARCH[building.activeResearchId].requiredItems) {
-          if (itemCount(building.researchHold, itemId) === 0) {
-            const id = `request:${building.id}:research:${itemId}`;
+        const node = this.state.research[building.activeResearchId];
+        for (const itemId of new Set(RESEARCH[building.activeResearchId].requiredItems)) {
+          const delivered = Math.min(1, itemCount(building.researchHold, itemId));
+          const id = `request:${building.id}:research:${itemId}`;
+          const reserved = this.requestQuantityByState(id, "reserved") + itemCount(building.manualProjectDelivery ?? {}, itemId);
+          const inTransit = this.requestQuantityByState(id, "inTransit");
+          const missing = Math.max(0, 1 - delivered - reserved - inTransit);
+          if (delivered < 1) {
             activeIds.add(id);
             this.upsertRequest({
               id,
               type: "researchItem",
+              projectKind: "research",
               buildingId: building.id,
+              destinationId: building.id,
               itemId,
-              quantity: 1,
-              reservedQuantity: 0,
+              quantity: missing,
+              requiredQuantity: 1,
+              deliveredQuantity: delivered,
+              reservedQuantity: reserved,
+              inTransitQuantity: inTransit,
+              priority: node.priority ?? building.projectPriority ?? "normal",
+              createdAt: this.state.gameTime,
               state: "open",
               active: true,
-              label: `Reserved ${itemId} en route`,
+              blockingReason: missing > 0 ? "Awaiting public stock and supplier claim" : "Reserved or in transit",
+              label: `${ITEMS[itemId]?.shortName ?? itemId}: ${delivered}/1 delivered`,
             });
           }
         }
+      }
+      for (const itemId of Object.keys(building.output) as ItemId[]) {
+        const available = availableOutput(this.state, building, itemId);
+        if (available <= 0) continue;
+        const id = `request:${building.id}:output:${itemId}`;
+        activeIds.add(id);
+        this.upsertRequest({
+          id,
+          type: "buildingOutput",
+          buildingId: building.id,
+          itemId,
+          quantity: available,
+          reservedQuantity: 0,
+          state: "open",
+          sourceId: building.id,
+          active: true,
+          label: `${available} ${ITEMS[itemId].name} ready`,
+        });
       }
     }
     for (const request of Object.values(this.state.logisticsRequests)) {
@@ -1563,18 +1860,35 @@ export class Simulation {
     }
   }
 
+  private requestQuantityByState(requestId: string, state: "reserved" | "inTransit"): number {
+    return Object.values(this.state.reservations)
+      .filter((reservation) => reservation.requestId === requestId && reservation.state === state)
+      .reduce((total, reservation) => total + Math.max(0, reservation.quantity - reservation.deliveredQuantity), 0);
+  }
+
   private upsertRequest(next: LogisticsRequest): void {
     const existing = this.state.logisticsRequests[next.id];
-    if (!existing || ["completed", "cancelled", "invalid"].includes(existing.state)) {
+    if (!existing) {
       this.state.logisticsRequests[next.id] = next;
+      return;
+    }
+    if (["completed", "cancelled", "invalid"].includes(existing.state)) {
+      this.state.logisticsRequests[next.id] = { ...next, createdAt: existing.createdAt ?? next.createdAt };
       return;
     }
     if (existing.state !== "open") {
       existing.active = true;
+      existing.requiredQuantity = next.requiredQuantity;
+      existing.deliveredQuantity = next.deliveredQuantity;
+      existing.inTransitQuantity = next.inTransitQuantity;
+      existing.priority = next.priority;
+      existing.blockingReason = next.blockingReason;
+      existing.label = next.label;
       return;
     }
     this.state.logisticsRequests[next.id] = {
       ...next,
+      createdAt: existing.createdAt ?? next.createdAt,
       sourceId: existing.sourceId ?? next.sourceId,
       destinationId: existing.destinationId ?? next.destinationId,
       claimedBy: existing.claimedBy,
@@ -1644,6 +1958,33 @@ export class Simulation {
     if (bot) clearBotPath(bot, "Claims released");
   }
 
+  private releaseProjectClaims(buildingId: string, reason: string): void {
+    for (const reservation of [...Object.values(this.state.reservations)]) {
+      if (reservation.destinationId !== buildingId) continue;
+      const bot = this.state.bots[reservation.botId];
+      releaseReservation(this.state, reservation);
+      if (bot?.program) {
+        bot.program.currentRequestId = undefined;
+        bot.program.currentReservationId = undefined;
+        bot.program.currentTargetId = undefined;
+        bot.program.blockingReason = `Project claim released: ${reason}`;
+        bot.program.blockedReason = bot.program.blockingReason;
+      }
+      if (bot) clearBotPath(bot, reason);
+      this.state.releaseEvents.push(`${this.state.tick}: ${reservation.id} // ${reason}`);
+    }
+    for (const request of Object.values(this.state.logisticsRequests)) {
+      if (request.buildingId !== buildingId || (request.type !== "construction" && request.type !== "researchItem")) continue;
+      request.active = false;
+      request.state = "cancelled";
+      request.claimedBy = undefined;
+      request.reservedQuantity = 0;
+      request.inTransitQuantity = 0;
+      request.blockingReason = reason;
+    }
+    this.state.releaseEvents = this.state.releaseEvents.slice(-20);
+  }
+
   private updateObjectives(): void {
     while (this.state.objectiveIndex < OBJECTIVES.length - 1 && this.objectiveComplete(this.state.objectiveIndex)) {
       this.state.objectiveIndex += 1;
@@ -1679,6 +2020,10 @@ export class Simulation {
         return this.state.flags.chargingStationBuilt && this.state.flags.minerRunning && this.state.flags.observedOutputFull;
       case 11:
         return this.state.automation.completed;
+      case 12:
+        return this.state.flags.delegatedConstruction;
+      case 13:
+        return this.state.flags.delegatedResearch && research.projectCoordination.completed;
       default:
         return false;
     }
@@ -1717,6 +2062,10 @@ export class Simulation {
   }
 
   private cancelBotTask(bot: BotEntity): void {
+    const projectTarget = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
+    if (projectTarget && inventoryTotal(projectTarget.manualProjectDelivery ?? {}) > 0) {
+      projectTarget.manualProjectDelivery = {};
+    }
     if (bot.task.payload) removeItems(bot.reservedInventory, bot.task.payload);
     if (bot.task.kind === "researching" || (bot.task.kind === "moving" && bot.task.nextKind === "researching")) {
       const bench = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
@@ -1772,6 +2121,7 @@ export class Simulation {
     }
     return Object.values(this.state.buildings).some(
       (building) =>
+        !building.cancelled &&
         x >= building.position.x &&
         x < building.position.x + building.footprint.width &&
         y >= building.position.y &&

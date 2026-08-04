@@ -8,13 +8,29 @@ Programs are ordered arrays of serializable commands. The interpreter reads the 
 
 Acquisition commands wait and retry when the colony temporarily has no work. Invalid ordering, missing state, and unreachable destinations block and stop the program with a specific reason. Restarting begins at command one. Stopping, replacing, or editing a program releases deposit, logistics, and charging claims while preserving cargo already carried.
 
+## Colony Supplier
+
+`Colony Supplier` is ordinary editable Basic Brain data, not a dedicated state machine. Its stored command order is:
+
+1. Claim Project Supply Request: Any Project
+2. Move To Request Source
+3. Collect Reserved Items
+4. Move To Request Destination
+5. Deliver Reserved Items
+6. Recharge if battery is below 25%
+7. Repeat
+
+The claim command can filter construction, research, or any project and optionally one item. Its deterministic dispatcher considers project priority, request age, a reachable source-to-destination route, path cost, and stable IDs. Public sources include completed Field Storage input and compatible building output. Seed cargo is private.
+
+Project reservations use the existing reservation lifecycle. Uncollected stock is released when a program stops or changes. Collected cargo remains on the bot if a route, project, or restored reference becomes invalid. Construction and research inventory are authoritative simulation destinations; Phaser and the DOM only render them.
+
 ## Movement and interactions
 
 All Seed Drone orders and Utility Bot programs use deterministic four-direction A*. Building footprints, construction sites, deposits, map edges, and future impassable terrain hooks are treated as blocked. Bots path to reachable perimeter interaction tiles instead of occupied target tiles. Paths are stored as plain grid nodes with the current index, requested target, resolved interaction destination, status, world revision, and repath reason.
 
 ## Logistics and energy
 
-Output reservations refer to an item, quantity, source, destination, and lifecycle. Available source inventory subtracts uncollected reservations. Collection changes a reservation to in-transit; delivery completes and releases it. If a program stops in transit, its cargo remains physical but the request is cancelled.
+Output and project reservations refer to an item, quantity, source, destination, and lifecycle. Available source inventory subtracts uncollected reservations. Collection changes a reservation to in-transit; delivery completes and releases it. If a program stops in transit, its cargo remains physical while the claim is released safely.
 
 The Basic Charging Station owns one reservable dock and a regenerating local buffer. Utility Bots pay battery cost for actual path distance, mining, and loaded transfers. They receive no emergency world-space recharge. The Seed Drone alone retains its bootstrap solar array.
 

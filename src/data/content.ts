@@ -194,6 +194,18 @@ export const RESEARCH: Record<ResearchId, ResearchDefinition> = {
     ],
     consumeItems: false,
   },
+  projectCoordination: {
+    id: "projectCoordination",
+    name: "Project Coordination",
+    description: "Coordinate physical project requirements, public stock, and supplier assignments.",
+    prerequisites: ["utilityBotSystems"],
+    requiredItems: ["structuralFrame", "controller", "copperIngot"],
+    duration: 34,
+    benchTier: 1,
+    energyPerSecond: 0.55,
+    unlockIds: ["project.priority"],
+    consumeItems: false,
+  },
   localPower: {
     id: "localPower",
     name: "Local Power Distribution",
@@ -254,6 +266,16 @@ export const OBJECTIVES = [
   { id: "cradle", title: "The Seed Is No Longer Alone", detail: "Construct a cradle, fabricate a second component set, and build a Utility Bot." },
   { id: "miner", title: "Automate Repetition", detail: "Build a Charging Station, assign Iron Miner, and let furnace output fill once." },
   { id: "loop", title: "Close the Loop", detail: "Deliver 3 automated iron ingots and sustain both programs for 30 seconds." },
+  {
+    id: "delegateConstruction",
+    title: "Delegate Construction Supply",
+    detail: "Assign a third Utility Bot as Colony Supplier, place a project, and let it deliver public stock before the Seed constructs it.",
+  },
+  {
+    id: "delegateResearch",
+    title: "Delegate Research Supply",
+    detail: "Select Project Coordination, let Colony Supplier deliver all three examples, then operate the bench with the Seed.",
+  },
 ] satisfies ObjectiveDefinition[];
 
 export const ITEM_ORDER = Object.keys(ITEMS) as ItemId[];

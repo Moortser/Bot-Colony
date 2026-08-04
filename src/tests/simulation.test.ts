@@ -61,7 +61,7 @@ describe("Seed bootstrap systems", () => {
     expect(after).toBe(before);
   });
 
-  it("reserves construction cargo, then transfers it at the access point", () => {
+  it("places a site first, then lets the Seed supply and construct through the access point", () => {
     const simulation = new Simulation();
     simulation.seed.battery = 100;
     addItems(simulation.seed.inventory, { ironIngot: 2 });
@@ -69,6 +69,10 @@ describe("Seed bootstrap systems", () => {
     const id = simulation.placeBuilding("storage", 21, 20);
     expect(id).toBeTruthy();
     expect(simulation.seed.inventory.ironIngot).toBe(2);
+    expect(simulation.seed.reservedInventory.ironIngot).toBeUndefined();
+    simulation.stepFixed();
+    expect(simulation.state.logisticsRequests[`request:${id}:construction:ironIngot`]?.quantity).toBe(2);
+    expect(simulation.commandConstructSite(id!)).toBe(true);
     expect(simulation.seed.reservedInventory.ironIngot).toBe(2);
     simulation.stepFixed(2);
     expect(simulation.seed.inventory.ironIngot).toBeUndefined();

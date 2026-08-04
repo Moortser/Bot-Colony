@@ -284,6 +284,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const entity of entities) this.renderEntity(entity, viewTimeMs);
 
+    this.drawProjectMarkers();
     this.renderSelection(selected);
     this.renderPlacement();
     if (simulation.state.debug) this.drawDebug(entities, selected);
@@ -408,7 +409,10 @@ export class GameScene extends Phaser.Scene {
         );
       }
     }
-    if (selected.kind === "bot") this.drawSelectedBotPath(selected);
+    if (selected.kind === "bot") {
+      this.drawSelectedBotPath(selected);
+      this.drawSupplierFeedback(selected);
+    }
   }
 
   private drawSelectedBotPath(bot: BotEntity): void {
@@ -437,6 +441,48 @@ export class GameScene extends Phaser.Scene {
       const point = this.iso(target.position);
       this.debugLayer.lineStyle(1, 0xef9b88, 0.8);
       this.debugLayer.strokeRect(Math.round(point.x - 8), Math.round(point.y - 8), 16, 12);
+    }
+  }
+
+  private drawProjectMarkers(): void {
+    const requests = Object.values(runtime.simulation.state.logisticsRequests).filter(
+      (request) => request.active && (request.type === "construction" || request.type === "researchItem"),
+    );
+    const grouped = new Map<string, typeof requests>();
+    for (const request of requests) grouped.set(request.buildingId, [...(grouped.get(request.buildingId) ?? []), request]);
+    for (const [buildingId, rows] of grouped) {
+      const building = runtime.simulation.state.buildings[buildingId];
+      if (!building) continue;
+      const point = this.buildingGround(building);
+      const priority = rows.some((row) => row.priority === "high") ? "high" : rows.every((row) => row.priority === "low") ? "low" : "normal";
+      const color = priority === "high" ? 0xef9b88 : priority === "low" ? 0x7b8b80 : 0xf3c557;
+      this.debugLayer.fillStyle(0x151c1a, 0.95);
+      this.debugLayer.fillRect(Math.round(point.x - 13), Math.round(point.y - 54), 26, 16);
+      this.debugLayer.lineStyle(2, color, 1);
+      this.debugLayer.strokeRect(Math.round(point.x - 13), Math.round(point.y - 54), 26, 16);
+      this.debugLayer.fillStyle(color, 1);
+      this.debugLayer.fillRect(Math.round(point.x - 8), Math.round(point.y - 49), 4, 5);
+      this.debugLayer.fillRect(Math.round(point.x - 1), Math.round(point.y - 49), 4, 5);
+      this.debugLayer.fillRect(Math.round(point.x + 6), Math.round(point.y - 49), 4, 5);
+    }
+  }
+
+  private drawSupplierFeedback(bot: BotEntity): void {
+    const program = bot.program;
+    const reservation = program?.currentReservationId ? runtime.simulation.state.reservations[program.currentReservationId] : undefined;
+    if (program?.templateId !== "colonySupplier" || !reservation) return;
+    const source = runtime.simulation.state.buildings[reservation.sourceId];
+    const destination = runtime.simulation.state.buildings[reservation.destinationId];
+    for (const [building, color, offset] of [
+      [source, 0x67c5bd, -1],
+      [destination, 0xf3c557, 1],
+    ] as const) {
+      if (!building) continue;
+      const point = this.buildingGround(building);
+      this.debugLayer.lineStyle(3, color, 1);
+      this.debugLayer.strokeRect(Math.round(point.x - 20), Math.round(point.y - 18), 40, 24);
+      this.debugLayer.fillStyle(color, 1);
+      this.debugLayer.fillRect(Math.round(point.x + offset * 7 - 3), Math.round(point.y - 35), 6, 8);
     }
   }
 

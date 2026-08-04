@@ -11,6 +11,9 @@ const LABELS: Record<ProgramCommandType, string> = {
   mineUntilFull: "Mine until cargo is full",
   claimSupplyRequest: "Claim building supply request",
   claimOutputRequest: "Claim output pickup request",
+  claimProjectSupplyRequest: "Claim project supply request",
+  moveToRequestSource: "Move to request source",
+  moveToRequestDestination: "Move to request destination",
   collectReserved: "Collect reserved items",
   deliverReserved: "Deliver reserved items",
   deliverCargo: "Deliver cargo",
@@ -28,6 +31,7 @@ export function createProgramCommand(kind: ProgramCommandType, id: string): Prog
   }
   if (kind === "claimSupplyRequest") parameters.itemId = "ironOre";
   if (kind === "claimOutputRequest") parameters.itemId = "ironIngot";
+  if (kind === "claimProjectSupplyRequest") parameters.projectFilter = "any";
   if (kind === "deliverCargo") {
     parameters.itemId = "ironOre";
     parameters.destinationPolicy = "claimedRequest";
@@ -65,6 +69,18 @@ export const PROGRAM_TEMPLATES: Record<ProgramTemplateId, ProgramTemplate> = {
       "moveToTarget",
       "collectReserved",
       "moveToTarget",
+      "deliverReserved",
+      "rechargeIfBelow",
+      "repeat",
+    ]),
+  },
+  colonySupplier: {
+    name: "Colony Supplier",
+    commands: commands("supplier", [
+      "claimProjectSupplyRequest",
+      "moveToRequestSource",
+      "collectReserved",
+      "moveToRequestDestination",
       "deliverReserved",
       "rechargeIfBelow",
       "repeat",

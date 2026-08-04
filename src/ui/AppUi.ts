@@ -4,6 +4,7 @@ import { replaceSimulation, runtime } from "../runtime";
 import { inventoryTotal, itemCount } from "../simulation/inventory";
 import { Simulation } from "../simulation/simulation";
 import { BASIC_BRAIN_COMMANDS } from "../simulation/programs/templates";
+import { preferredBuildingInteraction } from "../simulation/pathfinding/grid";
 import type {
   BotEntity,
   BuildingEntity,
@@ -13,6 +14,8 @@ import type {
   ProgramCommand,
   ProgramCommandParameters,
   ProgramCommandType,
+  ProgramTemplateId,
+  ProjectPriority,
   ResearchId,
   SelectableEntity,
 } from "../simulation/types";
@@ -244,19 +247,19 @@ export class AppUi {
   private renderObjectives(): void {
     const state = runtime.simulation.state;
     const objective = OBJECTIVES[Math.min(state.objectiveIndex, OBJECTIVES.length - 1)];
-    const complete = state.flags.autonomousLoop;
+    const complete = state.flags.delegatedResearch && state.research.projectCoordination.completed;
     this.setHtml(
       "objectives",
       `<button class="objective-button" data-action="toggle-objective">
          <span class="objective-number">${String(state.objectiveIndex + 1).padStart(2, "0")}</span>
-         <span><small>BOOTSTRAP OBJECTIVE</small><b>${complete ? "Autonomous loop established" : escapeHtml(objective?.title ?? "")}</b></span>
+         <span><small>BOOTSTRAP OBJECTIVE</small><b>${complete ? "Automated project supply established" : escapeHtml(objective?.title ?? "")}</b></span>
          <i>${this.objectiveExpanded ? "-" : "+"}</i>
        </button>
        ${
          this.objectiveExpanded
            ? `<div class="objective-detail">
-                <p>${complete ? "The colony can now mine, refine, and store iron without individual orders." : escapeHtml(objective?.detail ?? "")}</p>
-                ${state.objectiveIndex === OBJECTIVES.length - 1 ? `<p class="automation-progress">AUTOMATED FE ${state.automation.ironIngotsDelivered}/3 // SUSTAINED ${Math.floor(state.automation.productiveSeconds)}/30s</p>` : ""}
+                <p>${complete ? "Bots can now move public stock into player-chosen construction and research projects while the Seed remains the operator." : escapeHtml(objective?.detail ?? "")}</p>
+                ${state.objectiveIndex === 11 ? `<p class="automation-progress">AUTOMATED FE ${state.automation.ironIngotsDelivered}/3 // SUSTAINED ${Math.floor(state.automation.productiveSeconds)}/30s</p>` : ""}
                 <div class="objective-track"><i style="width:${((state.objectiveIndex + (complete ? 1 : 0)) / OBJECTIVES.length) * 100}%"></i></div>
               </div>`
            : ""
@@ -271,16 +274,11 @@ export class AppUi {
     element.classList.toggle("mobile-open", this.mobilePanel === "build");
     if (!this.buildOpen) return;
     const simulation = runtime.simulation;
-    const seed = simulation.seed;
     const cards = (Object.entries(BUILDINGS) as Array<[BuildingTypeId, (typeof BUILDINGS)[BuildingTypeId]]>)
       .map(([type, definition]) => {
         const unlocked = simulation.state.unlocks.includes(definition.unlockId);
-        const affordable = Object.entries(definition.cost).every(
-          ([itemId, quantity]) =>
-            itemCount(seed.inventory, itemId as ItemId) - itemCount(seed.reservedInventory, itemId as ItemId) >= quantity,
-        );
         return `<button class="build-choice ${runtime.placementType === type ? "active" : ""}" data-action="place" data-building="${type}"
-          ${!unlocked || !affordable ? "disabled" : ""}>
+          ${!unlocked ? "disabled" : ""}>
           <span class="build-glyph ${type}"><i></i></span>
           <b>${escapeHtml(definition.name)}</b>
           <small>${unlocked ? costLabel(definition.cost) : "LOCKED / RESEARCH"}</small>
@@ -315,6 +313,8 @@ export class AppUi {
     const request = program?.currentRequestId ? runtime.simulation.state.logisticsRequests[program.currentRequestId] : undefined;
     const reservation = program?.currentReservationId ? runtime.simulation.state.reservations[program.currentReservationId] : undefined;
     const target = program?.currentTargetId ? runtime.simulation.getEntity(program.currentTargetId) : undefined;
+    const source = reservation ? runtime.simulation.getEntity(reservation.sourceId) : undefined;
+    const destination = reservation ? runtime.simulation.getEntity(reservation.destinationId) : undefined;
     const programRows = program
       ? `<div class="program-list">${program.commands
           .map(
@@ -345,6 +345,7 @@ export class AppUi {
               <div class="mini-button-grid">
                 <button data-action="assign-program" data-program="ironMiner">IRON MINER</button>
                 <button data-action="assign-program" data-program="factoryHauler">FACTORY HAULER</button>
+                <button data-action="assign-program" data-program="colonySupplier">COLONY SUPPLIER</button>
                 ${program ? `<button data-action="restart-program">RESTART</button>${program.running ? '<button class="danger" data-action="stop-program">STOP PROGRAM</button>' : '<button data-action="start-program">START PROGRAM</button>'}` : ""}
               </div>
               ${
@@ -354,7 +355,11 @@ export class AppUi {
                        <span>LOOPS <b>${program.loopCount}</b></span>
                        <span>TARGET <b>${escapeHtml(target?.name ?? "--")}</b></span>
                        <span>REQUEST <b>${escapeHtml(request ? `${request.state}: ${request.label}` : "--")}</b></span>
+                       <span>PROJECT <b>${escapeHtml(request?.projectKind?.toUpperCase() ?? "--")}</b></span>
+                       <span>SOURCE <b>${escapeHtml(source?.name ?? "--")}</b></span>
+                       <span>DESTINATION <b>${escapeHtml(destination?.name ?? "--")}</b></span>
                        <span>RESERVED <b>${escapeHtml(reservation ? `${reservation.itemId} x${reservation.quantity} / ${reservation.state}` : "--")}</b></span>
+                       <span>CARRIED <b>${escapeHtml(reservation ? `${ITEMS[reservation.itemId].shortName} x${itemCount(bot.inventory, reservation.itemId)}` : "--")}</b></span>
                        <span>PATH <b>${bot.path.status} ${bot.path.currentIndex}/${Math.max(0, bot.path.tiles.length - 1)}</b></span>
                      </div>`
                   : ""
@@ -385,13 +390,31 @@ export class AppUi {
         ["copperOre", "Copper Ore"],
       ]);
     }
-    if (["claimSupplyRequest", "claimOutputRequest", "deliverCargo"].includes(command.kind)) {
+    if (["claimSupplyRequest", "deliverCargo"].includes(command.kind)) {
       controls = select("itemId", command.parameters.itemId ?? "ironOre", [
         ["ironOre", "Iron Ore"],
         ["copperOre", "Copper Ore"],
         ["ironIngot", "Iron Ingot"],
         ["copperIngot", "Copper Ingot"],
       ]);
+    }
+    if (command.kind === "claimOutputRequest") {
+      controls = select("itemId", command.parameters.itemId ?? "", [
+        ["", "Any output item"],
+        ...Object.values(ITEMS).map((item): [string, string] => [item.id, item.name]),
+      ]);
+    }
+    if (command.kind === "claimProjectSupplyRequest") {
+      controls =
+        select("projectFilter", command.parameters.projectFilter ?? "any", [
+          ["any", "Any project"],
+          ["construction", "Construction"],
+          ["research", "Research"],
+        ]) +
+        select("itemId", command.parameters.itemId ?? "", [
+          ["", "Any item"],
+          ...Object.values(ITEMS).map((item): [string, string] => [item.id, item.name]),
+        ]);
     }
     if (command.kind === "rechargeIfBelow") {
       controls =
@@ -409,16 +432,65 @@ export class AppUi {
     const requests = Object.values(runtime.simulation.state.logisticsRequests).filter(
       (request) => request.buildingId === building.id && request.active,
     );
-    return `${titleBar(building.complete ? "COLONY STRUCTURE" : "CONSTRUCTION SITE", building.name, "selection")}
+    const priorityUnlocked = runtime.simulation.state.unlocks.includes("project.priority");
+    const priority = building.projectPriority ?? "normal";
+    const priorityControls = `<div class="priority-controls" aria-label="Project priority">
+      ${(["high", "normal", "low"] as ProjectPriority[])
+        .map(
+          (value) =>
+            `<button data-action="project-priority" data-priority="${value}" class="${priority === value ? "active" : ""}" ${priorityUnlocked ? "" : "disabled"}>${value.toUpperCase()}</button>`,
+        )
+        .join("")}
+      ${priorityUnlocked ? "" : "<small>Unlock with Project Coordination</small>"}
+    </div>`;
+    const projectRows = (
+      !building.complete && !building.cancelled
+        ? (Object.entries(definition.cost) as Array<[ItemId, number]>).map(([itemId, required]) => ({
+            itemId,
+            required,
+            delivered: itemCount(building.constructionInventory, itemId),
+            request: requests.find((entry) => entry.type === "construction" && entry.itemId === itemId),
+          }))
+        : researchDefinition
+          ? [...new Set(researchDefinition.requiredItems)].map((itemId) => ({
+              itemId,
+              required: 1,
+              delivered: itemCount(building.researchHold, itemId),
+              request: requests.find((entry) => entry.type === "researchItem" && entry.itemId === itemId),
+            }))
+          : []
+    )
+      .map(({ itemId, required, delivered, request }) => {
+        const reserved = request?.reservedQuantity ?? 0;
+        const inTransit = request?.inTransitQuantity ?? 0;
+        const missing = Math.max(0, required - delivered - reserved - inTransit);
+        return `<div class="project-item-row">
+          <b>${escapeHtml(ITEMS[itemId].name)}</b>
+          <span>REQ ${required}</span><span>DEL ${delivered}</span><span>RES ${reserved}</span><span>MOVE ${inTransit}</span><span>MISS ${missing}</span>
+          <small>${escapeHtml(request?.claimedBy ? `Supplier ${request.claimedBy} // ${request.state}` : request?.blockingReason ?? (missing === 0 ? "Delivered" : "Open"))}</small>
+        </div>`;
+      })
+      .join("");
+    const constructionAccess = preferredBuildingInteraction(building, "construction");
+    const operatorAccess = preferredBuildingInteraction(building, "operator");
+    const constructor = runtime.simulation.seed.task.targetId === building.id &&
+      (runtime.simulation.seed.task.kind === "building" || runtime.simulation.seed.task.nextKind === "building")
+      ? runtime.simulation.seed.id
+      : "--";
+    return `${titleBar(building.cancelled ? "RECOVERY CACHE" : building.complete ? "COLONY STRUCTURE" : "CONSTRUCTION SITE", building.name, "selection")}
       <div class="entity-summary building-summary ${building.type}"><span class="summary-glyph"></span>
         <div><small>${escapeHtml(building.id)}</small><b>${escapeHtml(definition.description)}</b></div></div>
       <section class="window-section compact-readouts">
         ${
-          building.complete
+          building.complete || building.cancelled
             ? `<label><span>INPUT / STORAGE</span></label><div class="item-row">${itemRows(building.input)}</div>
-               ${definition.outputCapacity > 0 ? `<label><span>OUTPUT</span></label><div class="item-row">${itemRows(building.output)}</div>` : ""}`
+               ${definition.outputCapacity > 0 || building.cancelled ? `<label><span>${building.cancelled ? "RECOVERABLE SALVAGE" : "OUTPUT"}</span></label><div class="item-row">${itemRows(building.output)}</div>` : ""}`
             : `<label><span>CONSTRUCTION</span><b>${Math.floor(building.constructionProgress * 100)}%</b></label>
-               ${progress(building.constructionProgress, 1)}<div class="item-row">${itemRows(building.constructionInventory)}</div>`
+               ${progress(building.constructionProgress, 1)}
+               <label><span>FOOTPRINT</span><b>${building.footprint.width}×${building.footprint.height}</b></label>
+               <label><span>ACCESS</span><b>${constructionAccess.x},${constructionAccess.y}</b></label>
+               <label><span>CONSTRUCTOR</span><b>${escapeHtml(constructor)}</b></label>
+               ${priorityControls}<div class="project-materials">${projectRows}</div>`
         }
         ${
         building.type === "furnace"
@@ -434,8 +506,12 @@ export class AppUi {
       </section>
       ${
         researchNode && researchDefinition
-          ? `<section class="window-section"><small class="section-label">ACTIVE RESEARCH</small><b>${escapeHtml(researchDefinition.name)}</b>
-              ${progress(researchNode.progress, researchDefinition.duration)}<div class="item-row">${itemRows(building.researchHold)}</div></section>`
+          ? `<section class="window-section project-panel"><small class="section-label">ACTIVE RESEARCH</small><b>${escapeHtml(researchDefinition.name)}</b>
+              <p>Prerequisites: ${escapeHtml(researchDefinition.prerequisites.map((id) => RESEARCH[id].name).join(", ") || "None")}</p>
+              <label><span>OPERATOR POINT</span><b>${operatorAccess.x},${operatorAccess.y}</b></label>
+              <label><span>ASSIGNED OPERATOR</span><b>${escapeHtml(building.operatorId ?? "--")}</b></label>
+              ${priorityControls}${progress(researchNode.progress, researchDefinition.duration)}
+              <div class="project-materials">${projectRows}</div></section>`
           : ""
       }
       <section class="window-section state-block ${building.blockingReason ? "blocked" : ""}">
@@ -443,7 +519,7 @@ export class AppUi {
         ${building.blockingReason ? `<em>${escapeHtml(building.blockingReason)}</em>` : ""}
       </section>
       ${
-        requests.length
+        requests.length && projectRows.length === 0
           ? `<section class="window-section"><small class="section-label">LOGISTICS</small>${requests
               .map(
                 (request) =>
@@ -495,7 +571,11 @@ export class AppUi {
         ${commandButton("Controller", "craft", UI_ICON_FRAMES.build, { data: 'data-recipe="controller"' })}
       `;
     } else if (entity?.kind === "building") {
-      if (!entity.complete) actions = commandButton("Resume build", "construct-site", UI_ICON_FRAMES.build);
+      if (entity.cancelled) actions = commandButton("Collect salvage", "collect-building", UI_ICON_FRAMES.build);
+      else if (!entity.complete) {
+        actions = commandButton("Supply and Construct", "construct-site", UI_ICON_FRAMES.build);
+        actions += commandButton("Cancel Site", "cancel-site", UI_ICON_FRAMES.pause, { danger: true });
+      }
       else {
         if (entity.type === "furnace") {
           actions += commandButton("Supply input", "supply-building", UI_ICON_FRAMES.mine);
@@ -506,6 +586,7 @@ export class AppUi {
           actions += commandButton("Research tree", "toggle-research", UI_ICON_FRAMES.research, { active: this.researchOpen });
           actions += commandButton("Collect items", "collect-building", UI_ICON_FRAMES.build);
           if (entity.activeResearchId) {
+            actions += commandButton("Operate Research", "operate-research", UI_ICON_FRAMES.research);
             actions += commandButton("Cancel research", "cancel-research", UI_ICON_FRAMES.pause, { danger: true });
           }
         }
@@ -562,9 +643,6 @@ export class AppUi {
         const prerequisitesMet = definition.prerequisites.every(
           (researchId) => runtime.simulation.state.research[researchId].completed,
         );
-        const itemsPresent = definition.requiredItems.every(
-          (itemId) => itemCount(runtime.simulation.seed.inventory, itemId) >= 1,
-        );
         const state = node.completed
           ? "COMPLETED"
           : definition.disabled
@@ -575,9 +653,7 @@ export class AppUi {
                 ? "LOCKED"
                 : !bench
                   ? "NO BENCH"
-                  : itemsPresent
-                    ? "READY"
-                    : "MISSING ITEMS";
+                  : "AVAILABLE";
         return `<article class="research-card ${state.toLowerCase().replaceAll(" ", "-")}">
           <div class="research-state">${state}</div><h3>${escapeHtml(definition.name)}</h3>
           <p>${escapeHtml(definition.description)}</p>
@@ -592,10 +668,10 @@ export class AppUi {
           <small>${definition.duration}s / bench tier ${definition.benchTier} / items ${definition.consumeItems ? "consumed" : "returned"}</small>
           ${progress(node.progress, definition.duration)}
           <button data-action="research" data-research="${id}" ${
-            !bench || node.completed || definition.disabled || !prerequisitesMet || !itemsPresent || bench.activeResearchId
+            !bench || node.completed || definition.disabled || !prerequisitesMet || !!bench.activeResearchId
               ? "disabled"
               : ""
-          }>BEGIN RESEARCH</button>
+          }>SELECT PROJECT</button>
         </article>`;
       })
       .join("");
@@ -640,15 +716,21 @@ export class AppUi {
       summary[request.state] = (summary[request.state] ?? 0) + 1;
       return summary;
     }, {});
+    const projectRequests = activeRequests.filter((request) => request.type === "construction" || request.type === "researchItem");
+    const supplier = selected?.kind === "bot" && selected.program?.templateId === "colonySupplier" ? selected : undefined;
     element.textContent = [
       "DEBUG / AUTHORITATIVE SIMULATION",
       `tick ${state.tick} / fixed ${10 * state.speed} steps/s / time ${state.gameTime.toFixed(1)}s / speed ${state.speed}x`,
       `tile ${runtime.hoverTile ? `${runtime.hoverTile.x},${runtime.hoverTile.y}` : "--"} / selected ${selected?.id ?? "--"}`,
       `objective ${state.objectiveIndex + 1}/${OBJECTIVES.length} / automated Fe ${state.automation.ironIngotsDelivered}/3 / sustained ${state.automation.productiveSeconds.toFixed(1)}/30s`,
       `requests ${activeRequests.length} ${JSON.stringify(requestStates)} / reservations ${Object.keys(state.reservations).length}`,
+      `projects ${projectRequests.map((request) => `${request.projectKind}:${request.itemId}@${request.priority ?? "normal"} del${request.deliveredQuantity ?? 0}/res${request.reservedQuantity}/move${request.inTransitQuantity ?? 0} ${request.claimedBy ?? "open"}`).join(" | ") || "--"}`,
+      `supplier ${supplier ? `${supplier.id} ip ${supplier.program?.instructionPointer ?? 0} / ${supplier.path.status} / ${supplier.program?.blockingReason || "running"}` : "--"}`,
+      `project inventories ${Object.values(state.buildings).filter((building) => !building.complete || building.activeResearchId).map((building) => `${building.id}:build${JSON.stringify(building.constructionInventory)}:research${JSON.stringify(building.researchHold)}`).join(" | ") || "--"}`,
       `path ${path ? `${path.status} node ${path.currentIndex}/${Math.max(0, path.tiles.length - 1)} target ${path.targetId ?? "--"} / ${path.repathReason || "no repath"}` : "--"}`,
       `deposit claims ${Object.values(state.deposits).filter((deposit) => deposit.reservedBy).map((deposit) => `${deposit.id}:${deposit.reservedBy}`).join(", ") || "--"}`,
       `charging docks ${Object.values(state.buildings).filter((building) => building.type === "chargingStation").map((building) => `${building.id}:${building.chargingBotId ?? "open"}@${building.power.toFixed(0)}`).join(", ") || "--"}`,
+      `release events ${state.releaseEvents.slice(-4).join(" | ") || "--"}`,
     ].join("\n");
   }
 
@@ -693,6 +775,7 @@ export class AppUi {
     if (action === "mine") simulation.commandMine(target.dataset.item as "ironOre" | "copperOre");
     if (action === "craft") simulation.commandCraft(target.dataset.recipe as keyof typeof RECIPES);
     if (action === "construct-site" && selected?.kind === "building") simulation.commandConstructSite(selected.id);
+    if (action === "cancel-site" && selected?.kind === "building") simulation.cancelConstructionSite(selected.id);
     if (action === "supply-building" && selected?.kind === "building") simulation.commandSupplyBuilding(selected.id);
     if (action === "collect-building" && selected?.kind === "building") simulation.commandCollectBuilding(selected.id);
     if (action === "deposit-storage" && selected?.kind === "building") simulation.commandDepositToStorage(selected.id);
@@ -713,9 +796,13 @@ export class AppUi {
       }
     }
     if (action === "cancel-research" && selected?.kind === "building") simulation.cancelResearch(selected.id);
+    if (action === "operate-research" && selected?.kind === "building") simulation.commandOperateResearch(selected.id);
+    if (action === "project-priority" && selected?.kind === "building") {
+      simulation.setProjectPriority(selected.id, target.dataset.priority as ProjectPriority);
+    }
     if (action === "build-bot" && selected?.kind === "building") simulation.commandBuildBot(selected.id);
     if (action === "assign-program" && selected?.kind === "bot") {
-      simulation.assignProgram(selected.id, target.dataset.program as "ironMiner" | "factoryHauler");
+      simulation.assignProgram(selected.id, target.dataset.program as ProgramTemplateId);
     }
     if (action === "stop-program" && selected?.kind === "bot") simulation.stopProgram(selected.id);
     if (action === "start-program" && selected?.kind === "bot") simulation.startProgram(selected.id);
