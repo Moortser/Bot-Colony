@@ -9,7 +9,12 @@ export type ItemId =
   | "controller";
 
 export type BuildingTypeId = "storage" | "researchBench" | "furnace" | "botCradle" | "chargingStation";
-export type ResearchId = "dedicatedSmelting" | "utilityBotSystems" | "localPower" | "precisionAssembly";
+export type ResearchId =
+  | "dedicatedSmelting"
+  | "utilityBotSystems"
+  | "projectCoordination"
+  | "localPower"
+  | "precisionAssembly";
 export type RecipeId =
   | "microIron"
   | "microCopper"
@@ -20,7 +25,9 @@ export type RecipeId =
   | "furnaceIron"
   | "utilityBot";
 export type ModuleId = "bootstrapKit" | "miningTool" | "cargoRack";
-export type ProgramTemplateId = "ironMiner" | "factoryHauler";
+export type ProgramTemplateId = "ironMiner" | "factoryHauler" | "colonySupplier";
+export type ProjectKind = "construction" | "research";
+export type ProjectPriority = "high" | "normal" | "low";
 
 export type Inventory = Partial<Record<ItemId, number>>;
 
@@ -141,6 +148,9 @@ export type ProgramCommandType =
   | "mineUntilFull"
   | "claimSupplyRequest"
   | "claimOutputRequest"
+  | "claimProjectSupplyRequest"
+  | "moveToRequestSource"
+  | "moveToRequestDestination"
   | "collectReserved"
   | "deliverReserved"
   | "deliverCargo"
@@ -158,6 +168,7 @@ export interface ProgramCommandParameters {
   startThreshold?: number;
   resumeThreshold?: number;
   duration?: number;
+  projectFilter?: "any" | ProjectKind;
 }
 
 export interface ProgramCommand {
@@ -243,6 +254,10 @@ export interface BuildingEntity {
   cradleQueued: boolean;
   chargingBotId?: string;
   chargingProgress?: number;
+  projectPriority?: ProjectPriority;
+  cancelled?: boolean;
+  automatedConstructionDeliveries?: number;
+  manualProjectDelivery?: Inventory;
 }
 
 export interface DepositEntity {
@@ -263,6 +278,8 @@ export interface ResearchNodeState {
   assignedOperatorId?: string;
   reservedItemRefs: Array<{ itemId: ItemId; quantity: 1; holderId: string }>;
   blockingReason: string;
+  priority?: ProjectPriority;
+  automatedDeliveries?: number;
 }
 
 export type LogisticsRequestType =
@@ -293,6 +310,13 @@ export interface LogisticsRequest {
   state: LogisticsRequestState;
   active: boolean;
   label: string;
+  priority?: ProjectPriority;
+  createdAt?: number;
+  requiredQuantity?: number;
+  deliveredQuantity?: number;
+  inTransitQuantity?: number;
+  blockingReason?: string;
+  projectKind?: ProjectKind;
 }
 
 export type ReservationState = "reserved" | "inTransit" | "completed" | "released" | "invalid";
@@ -308,6 +332,7 @@ export interface Reservation {
   state: ReservationState;
   collectedQuantity: number;
   deliveredQuantity: number;
+  sourceInventory?: "input" | "output";
 }
 
 export interface SimulationFlags {
@@ -325,6 +350,9 @@ export interface SimulationFlags {
   minerRunning: boolean;
   observedOutputFull: boolean;
   autonomousLoop: boolean;
+  delegatedConstruction: boolean;
+  delegatedResearch: boolean;
+  projectCoordination: boolean;
 }
 
 export interface AutomationProgress {
@@ -342,7 +370,7 @@ export interface Notification {
 }
 
 export interface SimulationState {
-  version: 2;
+  version: 3;
   tick: number;
   gameTime: number;
   speed: 0 | 1 | 2 | 4;
@@ -362,6 +390,7 @@ export interface SimulationState {
   flags: SimulationFlags;
   notifications: Notification[];
   debug: boolean;
+  releaseEvents: string[];
 }
 
 export type SelectableEntity = BotEntity | BuildingEntity | DepositEntity;

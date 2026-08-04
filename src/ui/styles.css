@@ -1010,6 +1010,94 @@ button:disabled {
   color: var(--amber);
 }
 
+.priority-controls {
+  display: grid;
+  margin: 7px 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.priority-controls button {
+  min-height: 28px;
+  color: var(--beige);
+  background: #28312e;
+  border: 1px solid #59645b;
+  font-size: 7px;
+}
+
+.priority-controls button.active {
+  color: #1b211e;
+  background: var(--amber);
+  border-color: var(--amber-light);
+}
+
+.priority-controls small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 6px;
+  text-align: center;
+}
+
+.project-materials {
+  display: grid;
+  gap: 4px;
+}
+
+.project-item-row {
+  display: grid;
+  padding: 5px;
+  grid-template-columns: 1.5fr repeat(5, auto);
+  align-items: center;
+  color: #9da494;
+  background: #151c1a;
+  border: 1px solid #465149;
+  gap: 4px;
+  font-size: 6px;
+}
+
+.project-item-row > b {
+  color: var(--beige);
+  font-size: 7px;
+}
+
+.project-item-row > small {
+  grid-column: 1 / -1;
+  color: var(--amber);
+  line-height: 1.35;
+}
+
+.project-panel > p {
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.4;
+}
+
+.project-panel > .section-label,
+.project-panel > b {
+  display: block;
+}
+
+.project-panel > b {
+  margin: 4px 0 7px;
+  color: var(--amber-light);
+  font-size: 9px;
+}
+
+.project-panel > label {
+  display: flex;
+  margin: 5px 0 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #9ea28f;
+  font-size: 8px;
+}
+
+.project-panel > label b {
+  color: var(--amber-light);
+  text-align: right;
+}
+
 .empty-selection {
   display: grid;
   min-height: 150px;
@@ -1544,7 +1632,7 @@ button:disabled {
   .window-title > button {
     width: 40px;
     min-width: 40px;
-    height: 36px;
+    height: 40px;
   }
 
   .window-title small,
@@ -1563,6 +1651,38 @@ button:disabled {
   .state-block > b,
   .item-chip {
     font-size: 9px;
+  }
+
+  .priority-controls button {
+    min-height: 40px;
+    font-size: 8px;
+  }
+
+  .mini-button-grid button,
+  .program-add button,
+  .program-params select,
+  .program-params input,
+  .program-add select {
+    min-height: 40px;
+  }
+
+  .program-row {
+    grid-template-columns: 22px minmax(0, 1fr) 36px 36px 36px;
+  }
+
+  .program-row button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .project-item-row {
+    grid-template-columns: 1fr repeat(3, auto);
+    font-size: 7px;
+  }
+
+  .project-item-row > b,
+  .project-item-row > small {
+    grid-column: 1 / -1;
   }
 
   .build-grid {

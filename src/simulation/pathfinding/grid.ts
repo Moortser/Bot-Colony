@@ -41,6 +41,7 @@ export function blockedTileKeys(state: SimulationState): Set<string> {
   const blocked = new Set<string>();
   for (const deposit of Object.values(state.deposits)) blocked.add(tileKey(deposit.position));
   for (const building of Object.values(state.buildings)) {
+    if (building.cancelled) continue;
     for (let x = 0; x < building.footprint.width; x += 1) {
       for (let y = 0; y < building.footprint.height; y += 1) {
         blocked.add(tileKey({ x: building.position.x + x, y: building.position.y + y }));

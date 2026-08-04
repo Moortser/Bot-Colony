@@ -15,6 +15,7 @@ npm.cmd run dev
 Open the local URL printed by Vite. For a production check:
 
 ```powershell
+npm.cmd run typecheck
 npm.cmd test
 npm.cmd run build
 npm.cmd run preview
@@ -32,8 +33,13 @@ npm.cmd run preview
 8. Build a Bot Construction Cradle and activate Utility Bots.
 9. Assign one bot the Iron Miner program. Let furnace output fill to expose the bottleneck.
 10. Assign a second bot Factory Hauler to close the deposit → furnace → storage loop.
+11. Assign a third bot the editable Colony Supplier program and place another project.
+12. Let public stock travel physically from storage to the site, then send the Seed to construct it.
+13. Select Project Coordination, let the Supplier deliver its three examples, and operate the bench with the Seed.
 
 The exact provisional recipes are shown in the UI and are intentionally compact for this foundation.
+
+Construction placement, material supply, and Seed labor are separate steps. Research selection, example delivery, and Seed operation are separate as well. See `docs/project-supply.md` for request accounting, cancellation recovery, priorities, and save behavior.
 
 ## Controls
 
@@ -50,6 +56,7 @@ Save and Load store the plain simulation snapshot in browser local storage.
 ## Visual pipeline
 
 - `docs/art-direction.md` defines the shipped projection, palette, lighting, anchors, animation, UI, and scaling rules.
+- `docs/project-supply.md` documents construction/research project logistics and the Colony Supplier interpreter commands.
 - `scripts/generate-pixel-assets.mjs` deterministically rebuilds the original PNG sprite atlases without external art services.
 - `src/game/assets/manifest.ts` owns stable texture keys, frame numbers, anchors, zoom steps, and state-to-frame mapping.
 - `public/assets/sprites/` contains the committed runtime atlases.
@@ -62,6 +69,8 @@ Save and Load store the plain simulation snapshot in browser local storage.
 - `src/game/` — isometric projection, asset manifest, and Phaser sprite rendering/input
 - `src/ui/` — responsive retro-industrial management UI
 - `src/tests/` — projection, inventory, resource flow, research, logistics, persistence, and visual-state tests
+
+Pull requests and active development branches run deterministic asset generation, strict TypeScript checking, the complete test suite, and a production build in GitHub Actions. Vite's existing Phaser bundle-size warning is expected for this milestone; bundle splitting is intentionally deferred.
 
 ## Repository transition
 

@@ -27,13 +27,13 @@ export function completeReservation(state: SimulationState, reservation: Reserva
 
 export function releaseReservation(state: SimulationState, reservation: Reservation, nextState: "released" | "invalid" = "released"): void {
   const request = state.logisticsRequests[reservation.requestId];
-  const wasInTransit = reservation.state === "inTransit";
   reservation.state = nextState;
   if (request && request.state !== "completed") {
     request.claimedBy = undefined;
     request.reservedQuantity = 0;
-    if (wasInTransit) request.active = false;
-    request.state = wasInTransit ? "cancelled" : request.active ? "open" : nextState === "invalid" ? "invalid" : "cancelled";
+    const projectRequest = request.type === "construction" || request.type === "researchItem";
+    request.active = projectRequest ? true : request.active;
+    request.state = nextState === "invalid" ? "invalid" : request.active ? "open" : "cancelled";
   }
   delete state.reservations[reservation.id];
 }
