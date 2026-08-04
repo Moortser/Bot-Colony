@@ -10,6 +10,11 @@ import {
   removeItems,
   transferItem,
 } from "./inventory";
+import { CHARGER_BUFFER_CAPACITY, CHARGER_REGEN_RATE, CHARGE_RATE, batteryPercent, reachableChargingStations } from "./energy/charging";
+import { availableOutput, completeReservation, releaseReservation } from "./logistics/reservations";
+import { clearBotPath, followBotPath, isBotAtInteraction, planBotPath } from "./movement/pathMovement";
+import { resolveInteractionPath } from "./pathfinding/grid";
+import { BASIC_BRAIN_COMMANDS, PROGRAM_TEMPLATES, createProgramCommand } from "./programs/templates";
 import type {
   BotEntity,
   BotProgram,
@@ -22,8 +27,11 @@ import type {
   ItemId,
   LogisticsRequest,
   ProgramCommand,
+  ProgramCommandParameters,
+  ProgramCommandType,
   ProgramTemplateId,
   RecipeId,
+  Reservation,
   ResearchId,
   ResearchNodeState,
   SelectableEntity,
@@ -39,49 +47,12 @@ const IDLE_TASK: BotTask = {
   duration: 0,
 };
 
-const PROGRAMS: Record<ProgramTemplateId, { name: string; commands: ProgramCommand[] }> = {
-  ironMiner: {
-    name: "Iron Miner",
-    commands: [
-      { id: "find", kind: "findDeposit", label: "Find available iron deposit" },
-      { id: "move", kind: "move", label: "Move to deposit" },
-      { id: "mine", kind: "mine", label: "Mine until cargo is full" },
-      { id: "deliver", kind: "deliver", label: "Supply furnace input" },
-      { id: "charge", kind: "recharge", label: "Recharge below 15%" },
-      { id: "repeat", kind: "repeat", label: "Repeat" },
-    ],
-  },
-  factoryHauler: {
-    name: "Factory Hauler",
-    commands: [
-      { id: "request", kind: "pickupRequest", label: "Find available pickup request" },
-      { id: "pickup", kind: "collectOutput", label: "Collect reserved output" },
-      { id: "store", kind: "deliverStorage", label: "Deliver to Field Storage" },
-      { id: "charge", kind: "recharge", label: "Recharge below 15%" },
-      { id: "repeat", kind: "repeat", label: "Repeat" },
-    ],
-  },
-};
-
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function distance(a: GridPoint, b: GridPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function interactionPoint(building: BuildingEntity, mode: "input" | "output" | "operator" | "construction"): GridPoint {
-  switch (mode) {
-    case "input":
-      return { x: building.position.x - 1, y: building.position.y + building.footprint.height - 1 };
-    case "output":
-      return { x: building.position.x + building.footprint.width, y: building.position.y };
-    case "operator":
-      return { x: building.position.x + building.footprint.width, y: building.position.y + 1 };
-    case "construction":
-      return { x: building.position.x - 1, y: building.position.y };
-  }
 }
 
 export function createBotEntity(id: string, frame: "seed" | "utility", position: GridPoint, ordinal = 1): BotEntity {
@@ -97,8 +68,9 @@ export function createBotEntity(id: string, frame: "seed" | "utility", position:
     inventory: {},
     inventoryCapacity: definition.inventoryCapacity,
     reservedInventory: {},
-    modules: frame === "seed" ? ["bootstrapKit"] : [],
+    modules: frame === "seed" ? ["bootstrapKit"] : ["miningTool", "cargoRack"],
     task: clone(IDLE_TASK),
+    path: { tiles: [], currentIndex: 0, status: "idle", repathReason: "", worldRevision: 0 },
     status: frame === "seed" ? "Landed: bootstrap power critical" : "Idle: No program assigned",
     blockingReason: frame === "seed" ? "Battery below safe operating reserve" : "No program assigned",
     solarDeployed: false,
@@ -146,13 +118,14 @@ function createInitialState(): SimulationState {
   };
 
   return {
-    version: 1,
+    version: 2,
     tick: 0,
     gameTime: 0,
     speed: 1,
     previousSpeed: 1,
     nextId: 1,
     mapSize: 32,
+    worldRevision: 0,
     bots: { [seed.id]: seed },
     buildings: {},
     deposits,
@@ -161,6 +134,7 @@ function createInitialState(): SimulationState {
     reservations: {},
     unlocks: ["building.storage", "building.researchBench"],
     objectiveIndex: 0,
+    automation: { ironIngotsDelivered: 0, productiveSeconds: 0, completed: false },
     flags: {
       solarDeployed: false,
       minedIron: false,
@@ -171,6 +145,7 @@ function createInitialState(): SimulationState {
       furnaceBuilt: false,
       fabricatedComponents: false,
       cradleBuilt: false,
+      chargingStationBuilt: false,
       firstBotBuilt: false,
       minerRunning: false,
       observedOutputFull: false,
@@ -188,6 +163,39 @@ function createInitialState(): SimulationState {
   };
 }
 
+function normalizeState(snapshot: unknown): SimulationState {
+  const state = clone(snapshot) as SimulationState;
+  if (state.version === 2) return state;
+  state.version = 2;
+  state.worldRevision = 0;
+  state.automation = { ironIngotsDelivered: 0, productiveSeconds: 0, completed: false };
+  state.flags.chargingStationBuilt = false;
+  state.logisticsRequests = {};
+  state.reservations = {};
+  for (const deposit of Object.values(state.deposits)) deposit.reservedBy = undefined;
+  for (const bot of Object.values(state.bots)) {
+    bot.path = { tiles: [], currentIndex: 0, status: "idle", repathReason: "Migrated save", worldRevision: 0 };
+    if (!bot.program) continue;
+    const template = PROGRAM_TEMPLATES[bot.program.templateId];
+    bot.program = {
+      id: `program-${state.nextId++}`,
+      templateId: bot.program.templateId,
+      name: template.name,
+      commands: clone(template.commands),
+      running: false,
+      instructionPointer: 0,
+      currentCommandId: template.commands[0]?.id,
+      runtime: { elapsed: 0, phase: "idle", zeroDurationTransitions: 0, lastTransitionTick: state.tick },
+      blockingReason: "Migrated program is stopped; inspect and restart it",
+      loopCount: 0,
+      currentStep: 0,
+      blockedReason: "Migrated program is stopped; inspect and restart it",
+      phase: "idle",
+    };
+  }
+  return state;
+}
+
 export class Simulation {
   public readonly state: SimulationState;
   private accumulator = 0;
@@ -195,9 +203,9 @@ export class Simulation {
   public constructor(snapshot?: string | SimulationState) {
     this.state =
       typeof snapshot === "string"
-        ? (JSON.parse(snapshot) as SimulationState)
+        ? normalizeState(JSON.parse(snapshot))
         : snapshot
-          ? clone(snapshot)
+          ? normalizeState(snapshot)
           : createInitialState();
   }
 
@@ -271,14 +279,14 @@ export class Simulation {
     if (!deposit) return this.reject(bot, "No available deposit found");
     this.cancelBotTask(bot);
     bot.solarDeployed = false;
-    this.beginMove(bot, deposit.position, {
+    if (!this.beginMove(bot, deposit, "deposit", {
       kind: "mining",
       label: `Mining ${deposit.name}`,
       targetId: deposit.id,
       progress: 0,
       duration: 2.4,
       itemId,
-    });
+    })) return this.reject(bot, bot.path.repathReason);
     bot.status = `Travelling to ${deposit.name}`;
     return true;
   }
@@ -288,7 +296,9 @@ export class Simulation {
     const recipe = RECIPES[recipeId];
     if (!recipe || recipeId === "furnaceIron" || recipeId === "utilityBot") return false;
     if (seed.solarDeployed) return this.reject(seed, "Retract solar array before using bootstrap machinery");
-    if (!hasItems(seed.inventory, recipe.inputs)) return this.reject(seed, `Missing inputs for ${recipe.name}`);
+    if (!hasItems(seed.inventory, recipe.inputs) || !canReserve(seed.inventory, seed.reservedInventory, recipe.inputs)) {
+      return this.reject(seed, `Missing unreserved inputs for ${recipe.name}`);
+    }
     const outputQuantity = inventoryTotal(recipe.outputs);
     const inputQuantity = inventoryTotal(recipe.inputs);
     if (inventoryTotal(seed.inventory) - inputQuantity + outputQuantity > seed.inventoryCapacity) {
@@ -356,17 +366,24 @@ export class Simulation {
       status: "Construction site placed",
       blockingReason: "Awaiting Seed Drone and reserved materials",
       cradleQueued: false,
+      chargingProgress: 0,
     };
     this.state.buildings[id] = building;
+    this.state.worldRevision += 1;
     addItems(this.seed.reservedInventory, definition.cost);
-    this.beginMove(this.seed, interactionPoint(building, "construction"), {
+    if (!this.beginMove(this.seed, building, "construction", {
       kind: "building",
       label: `Constructing ${definition.name}`,
       targetId: id,
       progress: 0,
       duration: definition.buildTime,
       payload: { ...definition.cost },
-    });
+    })) {
+      removeItems(this.seed.reservedInventory, definition.cost);
+      delete this.state.buildings[id];
+      this.state.worldRevision += 1;
+      return undefined;
+    }
     this.seed.status = `Delivering reserved materials to ${definition.name}`;
     this.notify(`CONSTRUCTION MARKER // ${definition.name}`, "info");
     return id;
@@ -379,14 +396,14 @@ export class Simulation {
     const itemId: ItemId = building.type === "furnace" ? "ironOre" : "ironIngot";
     if (itemCount(seed.inventory, itemId) <= 0) return this.reject(seed, `Seed cargo has no ${itemId}`);
     this.cancelBotTask(seed);
-    this.beginMove(seed, interactionPoint(building, "input"), {
+    if (!this.beginMove(seed, building, "input", {
       kind: "program",
       label: `Supplying ${building.name}`,
       targetId: building.id,
       itemId,
       progress: 0,
       duration: 0,
-    });
+    })) return this.reject(seed, seed.path.repathReason);
     return true;
   }
 
@@ -404,30 +421,39 @@ export class Simulation {
     }
     this.cancelBotTask(this.seed);
     addItems(this.seed.reservedInventory, remaining);
-    this.beginMove(this.seed, interactionPoint(building, "construction"), {
+    if (!this.beginMove(this.seed, building, "construction", {
       kind: "building",
       label: `Constructing ${building.name}`,
       targetId: building.id,
       progress: 0,
       duration: BUILDINGS[building.type].buildTime,
       payload: remaining,
-    });
+    })) {
+      removeItems(this.seed.reservedInventory, remaining);
+      return this.reject(this.seed, this.seed.path.repathReason);
+    }
     return true;
   }
 
   public commandCollectBuilding(buildingId: string): boolean {
     const building = this.state.buildings[buildingId];
-    if (!building?.complete || inventoryTotal(building.output) === 0) {
+    const available = building
+      ? (Object.keys(building.output) as ItemId[]).reduce(
+          (total, itemId) => total + availableOutput(this.state, building, itemId),
+          0,
+        )
+      : 0;
+    if (!building?.complete || available === 0) {
       return this.reject(this.seed, "No finished items available");
     }
     this.cancelBotTask(this.seed);
-    this.beginMove(this.seed, interactionPoint(building, "output"), {
+    if (!this.beginMove(this.seed, building, "output", {
       kind: "program",
       label: `Collecting from ${building.name}`,
       targetId: building.id,
       progress: 0,
       duration: 0,
-    });
+    })) return this.reject(this.seed, this.seed.path.repathReason);
     return true;
   }
 
@@ -435,13 +461,13 @@ export class Simulation {
     const storage = this.state.buildings[storageId];
     if (!storage?.complete || storage.type !== "storage" || inventoryTotal(this.seed.inventory) === 0) return false;
     this.cancelBotTask(this.seed);
-    this.beginMove(this.seed, interactionPoint(storage, "input"), {
+    if (!this.beginMove(this.seed, storage, "input", {
       kind: "program",
       label: `Depositing cargo at ${storage.name}`,
       targetId: storage.id,
       progress: 0,
       duration: 0,
-    });
+    })) return this.reject(this.seed, this.seed.path.repathReason);
     return true;
   }
 
@@ -471,14 +497,21 @@ export class Simulation {
     bench.operatorId = seed.id;
     bench.status = `Preparing ${definition.name}`;
     bench.blockingReason = node.blockingReason;
-    this.beginMove(seed, interactionPoint(bench, "operator"), {
+    if (!this.beginMove(seed, bench, "operator", {
       kind: "researching",
       label: `Operating bench: ${definition.name}`,
       targetId: bench.id,
       progress: 0,
       duration: definition.duration,
       payload: required,
-    });
+    })) {
+      removeItems(seed.reservedInventory, required);
+      node.assignedBenchId = undefined;
+      node.assignedOperatorId = undefined;
+      bench.activeResearchId = undefined;
+      bench.operatorId = undefined;
+      return this.reject(seed, seed.path.repathReason);
+    }
     return true;
   }
 
@@ -515,14 +548,17 @@ export class Simulation {
     }
     this.cancelBotTask(seed);
     addItems(seed.reservedInventory, recipe.inputs);
-    this.beginMove(seed, interactionPoint(cradle, "input"), {
+    if (!this.beginMove(seed, cradle, "input", {
       kind: "supplyingCradle",
       label: "Supplying Basic Utility Bot components",
       targetId: cradle.id,
       progress: 0,
       duration: 0,
       payload: { ...recipe.inputs },
-    });
+    })) {
+      removeItems(seed.reservedInventory, recipe.inputs);
+      return this.reject(seed, seed.path.repathReason);
+    }
     return true;
   }
 
@@ -530,18 +566,24 @@ export class Simulation {
     const bot = this.state.bots[botId];
     if (!bot || bot.frame !== "utility" || !this.state.unlocks.includes("program.basic")) return false;
     this.releaseBotClaims(bot.id);
-    const definition = PROGRAMS[templateId];
+    const definition = PROGRAM_TEMPLATES[templateId];
     const program: BotProgram = {
+      id: `program-${this.state.nextId++}`,
       templateId,
       name: definition.name,
       commands: clone(definition.commands),
       running: true,
+      instructionPointer: 0,
+      currentCommandId: definition.commands[0]?.id,
+      runtime: { elapsed: 0, phase: "idle", zeroDurationTransitions: 0, lastTransitionTick: this.state.tick },
+      blockingReason: "",
+      loopCount: 0,
       currentStep: 0,
       blockedReason: "",
-      phase: "acquire",
+      phase: "idle",
     };
     bot.program = program;
-    bot.modules = [templateId === "ironMiner" ? "miningTool" : "cargoRack"];
+    bot.modules = ["miningTool", "cargoRack"];
     bot.task = { kind: "program", label: `${definition.name}: acquiring task`, progress: 0, duration: 0 };
     bot.status = `${definition.name} program running`;
     bot.blockingReason = "";
@@ -554,10 +596,27 @@ export class Simulation {
     const bot = this.state.bots[botId];
     if (!bot?.program) return false;
     bot.program.running = false;
+    bot.program.blockingReason = "Program stopped by operator";
     bot.program.blockedReason = "Program stopped by operator";
     this.releaseBotClaims(bot.id);
     this.setIdle(bot, "Program stopped", "Awaiting program start");
     return true;
+  }
+
+  public startProgram(botId: string, restart = false): boolean {
+    const bot = this.state.bots[botId];
+    if (!bot?.program) return false;
+    if (restart) this.resetProgramRuntime(bot, true);
+    bot.program.running = true;
+    bot.program.blockingReason = "";
+    bot.program.blockedReason = "";
+    bot.blockingReason = "";
+    bot.status = `${bot.program.name} program running`;
+    return true;
+  }
+
+  public restartProgram(botId: string): boolean {
+    return this.startProgram(botId, true);
   }
 
   public tryClaimRequest(requestId: string, botId: string): boolean {
@@ -567,7 +626,8 @@ export class Simulation {
   }
 
   public reorderProgram(botId: string, commandIndex: number, direction: -1 | 1): boolean {
-    const program = this.state.bots[botId]?.program;
+    const bot = this.state.bots[botId];
+    const program = bot?.program;
     if (!program) return false;
     const nextIndex = commandIndex + direction;
     if (nextIndex < 0 || nextIndex >= program.commands.length) return false;
@@ -576,6 +636,41 @@ export class Simulation {
     if (!command || !other) return false;
     program.commands[commandIndex] = other;
     program.commands[nextIndex] = command;
+    if (bot) this.resetProgramRuntime(bot, true);
+    return true;
+  }
+
+  public addProgramCommand(botId: string, kind: ProgramCommandType): boolean {
+    const bot = this.state.bots[botId];
+    if (!bot?.program || !BASIC_BRAIN_COMMANDS.some((entry) => entry.kind === kind)) return false;
+    bot.program.commands.push(createProgramCommand(kind, `command-${this.state.nextId++}`));
+    this.resetProgramRuntime(bot, true);
+    return true;
+  }
+
+  public removeProgramCommand(botId: string, commandIndex: number): boolean {
+    const bot = this.state.bots[botId];
+    if (!bot?.program || !bot.program.commands[commandIndex]) return false;
+    bot.program.commands.splice(commandIndex, 1);
+    this.resetProgramRuntime(bot, true);
+    return true;
+  }
+
+  public updateProgramCommand(botId: string, commandIndex: number, parameters: ProgramCommandParameters): boolean {
+    const bot = this.state.bots[botId];
+    const command = bot?.program?.commands[commandIndex];
+    if (!bot?.program || !command) return false;
+    command.parameters = { ...command.parameters, ...parameters };
+    if (command.kind === "rechargeIfBelow") {
+      const start = Math.max(1, Math.min(99, Number(command.parameters.startThreshold ?? 25)));
+      const resume = Math.max(start + 1, Math.min(100, Number(command.parameters.resumeThreshold ?? 90)));
+      command.parameters.startThreshold = start;
+      command.parameters.resumeThreshold = resume;
+    }
+    if (command.kind === "wait") {
+      command.parameters.duration = Math.max(0, Math.min(120, Number(command.parameters.duration ?? 0)));
+    }
+    this.resetProgramRuntime(bot, true);
     return true;
   }
 
@@ -604,13 +699,14 @@ export class Simulation {
     this.state.gameTime += delta;
     this.state.notifications = this.state.notifications.filter((notification) => notification.expiresAt > this.state.gameTime);
 
+    this.refreshRequests();
     for (const bot of Object.values(this.state.bots)) {
       if (bot.program?.running) this.updateProgram(bot, delta);
       else this.updateBotTask(bot, delta);
     }
     this.updateBuildings(delta);
     this.updateResearch(delta);
-    this.refreshRequests();
+    this.updateAutomationProgress(delta);
     this.updateObjectives();
   }
 
@@ -694,31 +790,33 @@ export class Simulation {
   }
 
   private moveBot(bot: BotEntity, delta: number): void {
-    const destination = bot.task.destination;
-    if (!destination) return this.setIdle(bot, "Stopped", "Destination invalid");
-    const dx = destination.x - bot.position.x;
-    const dy = destination.y - bot.position.y;
-    const remaining = Math.hypot(dx, dy);
-    const speed = BOT_FRAMES[bot.frame].moveSpeed;
-    const amount = speed * delta;
-    if (bot.battery <= 0.5) return this.setIdle(bot, "Stopped: Battery depleted", "Out of usable energy");
-    bot.battery = Math.max(0, bot.battery - 0.16 * amount);
-    if (remaining <= amount) {
-      bot.position = { ...destination };
+    if (!bot.path.targetId || !this.getEntity(bot.path.targetId)) {
+      return this.setIdle(bot, "Stopped", "Target no longer exists");
+    }
+    if (bot.path.status === "blocked" && bot.path.targetId && bot.path.interaction) {
+      const target = this.getEntity(bot.path.targetId);
+      if (target) planBotPath(this.state, bot, target, bot.path.interaction, "Revalidated manual route");
+    }
+    const result = followBotPath(this.state, bot, delta);
+    bot.task.destination = bot.path.interactionDestination;
+    if (result === "blocked") {
+      const target = bot.path.targetId ? this.getEntity(bot.path.targetId) : undefined;
+      if (target && bot.path.interaction && planBotPath(this.state, bot, target, bot.path.interaction, "Route obstruction")) return;
+      return this.setIdle(bot, "Stopped", bot.path.repathReason || "No valid path");
+    }
+    if (result === "arrived") {
       const nextKind = bot.task.nextKind ?? "idle";
       bot.task = {
         ...bot.task,
         kind: nextKind,
         label: bot.task.label,
-        destination: undefined,
+        destination: bot.path.interactionDestination,
         nextKind: undefined,
         progress: 0,
       };
       this.onArrival(bot);
       return;
     }
-    bot.position.x += (dx / remaining) * amount;
-    bot.position.y += (dy / remaining) * amount;
   }
 
   private onArrival(bot: BotEntity): void {
@@ -807,7 +905,7 @@ export class Simulation {
       this.setIdle(bot, moved > 0 ? `Delivered ${moved} item(s)` : "No compatible cargo transferred", moved > 0 ? "" : "Input full");
     } else if (bot.task.label.startsWith("Collecting")) {
       for (const itemId of Object.keys(building.output) as ItemId[]) {
-        transferItem(building.output, bot.inventory, bot.inventoryCapacity, itemId, 99);
+        transferItem(building.output, bot.inventory, bot.inventoryCapacity, itemId, availableOutput(this.state, building, itemId));
       }
       this.setIdle(bot, "Output collected", "");
     } else if (bot.task.label.startsWith("Depositing")) {
@@ -821,10 +919,24 @@ export class Simulation {
   private updateBuildings(delta: number): void {
     for (const building of Object.values(this.state.buildings)) {
       if (!building.complete) continue;
-      building.power = Math.min(100, building.power + 0.25 * delta);
+      building.power = Math.min(CHARGER_BUFFER_CAPACITY, building.power + (building.type === "chargingStation" ? CHARGER_REGEN_RATE : 0.25) * delta);
       if (building.type === "furnace") this.updateFurnace(building, delta);
       if (building.type === "botCradle") this.updateCradle(building, delta);
+      if (building.type === "chargingStation") this.updateChargingStation(building);
     }
+  }
+
+  private updateChargingStation(station: BuildingEntity): void {
+    const bot = station.chargingBotId ? this.state.bots[station.chargingBotId] : undefined;
+    if (!bot || !bot.program?.running || bot.program.currentTargetId !== station.id) {
+      station.chargingBotId = undefined;
+      station.chargingProgress = 0;
+      station.status = station.power > 0 ? "Dock available" : "Unpowered";
+      station.blockingReason = station.power > 0 ? "" : "Local power buffer empty";
+      return;
+    }
+    station.status = isBotAtInteraction(bot) ? `Charging ${bot.name}` : `Dock reserved by ${bot.name}`;
+    station.blockingReason = station.power > 0 ? "" : "Local power buffer empty";
   }
 
   private updateFurnace(building: BuildingEntity, delta: number): void {
@@ -940,156 +1052,427 @@ export class Simulation {
   private updateProgram(bot: BotEntity, delta: number): void {
     const program = bot.program;
     if (!program?.running) return;
-    if (bot.battery < 15 && program.phase !== "recharge") {
-      this.releaseBotClaims(bot.id);
-      program.phase = "recharge";
-      program.currentStep = program.commands.findIndex((command) => command.kind === "recharge");
-    }
-    if (program.phase === "recharge") {
-      bot.task = { kind: "program", label: `${program.name}: emergency solar recharge`, progress: bot.battery, duration: bot.maxBattery };
-      bot.status = "Recharging onboard emergency cell";
-      bot.blockingReason = "Program paused below battery threshold";
-      bot.battery = Math.min(bot.maxBattery, bot.battery + 5 * delta);
-      if (bot.battery >= 75) {
-        program.phase = "acquire";
-        program.currentStep = 0;
-        bot.blockingReason = "";
-      }
+    if (program.commands.length === 0 || program.instructionPointer < 0 || program.instructionPointer >= program.commands.length) {
+      this.blockProgram(bot, "Program has no executable command at the instruction pointer", false);
       return;
     }
-    if (program.templateId === "ironMiner") this.updateMinerProgram(bot, program, delta);
-    else this.updateHaulerProgram(bot, program, delta);
+    program.runtime.zeroDurationTransitions = 0;
+    for (let transition = 0; transition < 12; transition += 1) {
+      const command = program.commands[program.instructionPointer];
+      if (!command) {
+        this.blockProgram(bot, "Program reached the end without Repeat", false);
+        return;
+      }
+      this.syncProgramReadout(program);
+      command.runtimeStatus = "active";
+      program.currentCommandId = command.id;
+      bot.task = {
+        kind: "program",
+        label: `${program.name}: ${command.label}`,
+        targetId: program.currentTargetId,
+        destination: bot.path.interactionDestination,
+        progress: program.runtime.elapsed,
+        duration: command.parameters.duration ?? 0,
+      };
+      const result = this.executeProgramCommand(bot, program, command, delta);
+      this.syncProgramReadout(program);
+      if (result !== "complete") return;
+      this.completeProgramCommand(bot, command);
+      program.runtime.zeroDurationTransitions += 1;
+    }
+    this.blockProgram(bot, "Program exceeded the instant command transition limit", false);
   }
 
-  private updateMinerProgram(bot: BotEntity, program: BotProgram, delta: number): void {
-    if (itemCount(bot.inventory, "ironOre") >= bot.inventoryCapacity || program.phase === "deliver") {
-      const furnace = this.findBestFurnace();
-      if (!furnace) {
-        program.phase = "deliver";
-        program.blockedReason = "No furnace input has free capacity";
-        bot.status = "Blocked: Furnace input unavailable";
-        bot.blockingReason = program.blockedReason;
-        return;
+  private executeProgramCommand(
+    bot: BotEntity,
+    program: BotProgram,
+    command: ProgramCommand,
+    delta: number,
+  ): "running" | "complete" | "blocked" {
+    switch (command.kind) {
+      case "findDeposit":
+        return this.executeFindDeposit(bot, program, command);
+      case "moveToTarget":
+        return this.executeMoveToTarget(bot, program, delta);
+      case "mineUntilFull":
+        return this.executeMineUntilFull(bot, program, command, delta);
+      case "claimSupplyRequest":
+        return this.executeClaimSupplyRequest(bot, program, command);
+      case "claimOutputRequest":
+        return this.executeClaimOutputRequest(bot, program, command);
+      case "collectReserved":
+        return this.executeCollectReserved(bot, program);
+      case "deliverReserved":
+        return this.executeDeliverReserved(bot, program);
+      case "deliverCargo":
+        return this.executeDeliverCargo(bot, program, command);
+      case "rechargeIfBelow":
+        return this.executeRecharge(bot, program, command, delta);
+      case "wait": {
+        const duration = Math.max(0, command.parameters.duration ?? 0);
+        program.runtime.elapsed += delta;
+        bot.status = `Waiting // ${program.runtime.elapsed.toFixed(1)} / ${duration.toFixed(1)}s`;
+        return program.runtime.elapsed >= duration ? "complete" : "running";
       }
-      program.phase = "deliver";
-      program.currentStep = 3;
-      program.targetId = furnace.id;
-      bot.task = { kind: "program", label: "Iron Miner: supplying furnace", targetId: furnace.id, progress: 0, duration: 0 };
-      if (!this.moveToward(bot, interactionPoint(furnace, "input"), delta)) return;
-      const moved = transferItem(bot.inventory, furnace.input, BUILDINGS.furnace.inputCapacity, "ironOre", 99);
-      if (moved > 0) {
-        program.phase = "acquire";
-        program.currentStep = 5;
-        program.blockedReason = "";
-        bot.blockingReason = "";
-      }
-      return;
+      case "repeat":
+        program.loopCount += 1;
+        program.instructionPointer = -1;
+        for (const row of program.commands) row.runtimeStatus = "pending";
+        return "complete";
     }
-    let deposit = program.targetId ? this.state.deposits[program.targetId] : undefined;
-    if (!deposit || deposit.itemId !== "ironOre" || deposit.remaining <= 0 || (deposit.reservedBy && deposit.reservedBy !== bot.id)) {
-      deposit = this.nearestDeposit(bot.position, "ironOre", bot.id);
-      if (!deposit) {
-        program.blockedReason = "No unclaimed iron deposit";
-        bot.status = "Blocked: No available iron deposit";
-        bot.blockingReason = program.blockedReason;
-        return;
-      }
-      deposit.reservedBy = bot.id;
-      program.targetId = deposit.id;
-      program.phase = "moveDeposit";
+  }
+
+  private executeFindDeposit(bot: BotEntity, program: BotProgram, command: ProgramCommand): "complete" | "blocked" {
+    const itemId = command.parameters.resourceType ?? "ironOre";
+    const matching = Object.values(this.state.deposits).filter((deposit) => deposit.itemId === itemId && deposit.remaining > 0);
+    if (matching.length === 0) return this.blockProgram(bot, "No matching deposit", true);
+    const unclaimed = matching.filter((deposit) => !deposit.reservedBy || deposit.reservedBy === bot.id);
+    if (unclaimed.length === 0) return this.blockProgram(bot, "All matching deposits claimed", true);
+    const reachable = unclaimed
+      .map((deposit) => ({ deposit, route: resolveInteractionPath(this.state, bot.position, deposit, "deposit") }))
+      .filter(({ route }) => route.path.length > 0)
+      .sort((a, b) => a.route.path.length - b.route.path.length || a.deposit.id.localeCompare(b.deposit.id));
+    const selected = reachable[0];
+    if (!selected) return this.blockProgram(bot, "No reachable matching deposit", true);
+    selected.deposit.reservedBy = bot.id;
+    program.currentTargetId = selected.deposit.id;
+    program.runtime.phase = "depositClaimed";
+    clearBotPath(bot, "Target changed");
+    bot.status = `Claimed ${selected.deposit.name}`;
+    return "complete";
+  }
+
+  private executeMoveToTarget(bot: BotEntity, program: BotProgram, delta: number): "running" | "complete" | "blocked" {
+    if (!program.currentTargetId) return this.blockProgram(bot, "No current target", false);
+    const target = this.getEntity(program.currentTargetId);
+    if (!target) return this.blockProgram(bot, "Target invalid", false);
+    const interaction = this.interactionForProgramTarget(program, target);
+    const needsPlan =
+      bot.path.targetId !== target.id ||
+      bot.path.interaction !== interaction ||
+      bot.path.status === "idle" ||
+      bot.path.status === "blocked";
+    if (needsPlan && !planBotPath(this.state, bot, target, interaction, bot.path.status === "blocked" ? "Route revalidated" : "New target")) {
+      return this.blockProgram(bot, bot.path.repathReason || "No valid path", false);
     }
-    if (program.phase !== "mining") {
-      program.currentStep = 1;
-      bot.task = { kind: "program", label: `Iron Miner: moving to ${deposit.name}`, targetId: deposit.id, progress: 0, duration: 0 };
-      if (!this.moveToward(bot, deposit.position, delta)) return;
-      program.phase = "mining";
-      bot.task.progress = 0;
+    const result = followBotPath(this.state, bot, delta);
+    bot.task.destination = bot.path.interactionDestination;
+    bot.status = result === "moving" ? `Moving to ${target.name} // node ${bot.path.currentIndex}/${bot.path.tiles.length - 1}` : `At ${target.name}`;
+    if (result === "blocked") {
+      if (planBotPath(this.state, bot, target, interaction, "Route obstruction")) return "running";
+      return this.blockProgram(bot, bot.path.repathReason || "No valid path", false);
     }
-    program.currentStep = 2;
-    bot.task.label = `Iron Miner: mining ${deposit.name}`;
-    bot.task.progress += delta;
-    bot.status = `Mining autonomously // ${inventoryTotal(bot.inventory)}/${bot.inventoryCapacity}`;
-    bot.blockingReason = "";
-    bot.battery = Math.max(0, bot.battery - 0.55 * delta);
-    if (bot.task.progress >= 2.6 && deposit.remaining > 0) {
-      bot.task.progress -= 2.6;
+    return result === "arrived" ? "complete" : "running";
+  }
+
+  private executeMineUntilFull(
+    bot: BotEntity,
+    program: BotProgram,
+    command: ProgramCommand,
+    delta: number,
+  ): "running" | "complete" | "blocked" {
+    const deposit = program.currentTargetId ? this.state.deposits[program.currentTargetId] : undefined;
+    if (!deposit) return this.blockProgram(bot, "No deposit target", false);
+    if (!bot.modules.includes("miningTool")) return this.blockProgram(bot, "Missing Mining Tool", false);
+    if (command.parameters.resourceType && deposit.itemId !== command.parameters.resourceType) {
+      return this.blockProgram(bot, "Wrong resource", false);
+    }
+    if (!isBotAtInteraction(bot)) return this.blockProgram(bot, "Not at deposit", false);
+    if (inventoryTotal(bot.inventory) >= bot.inventoryCapacity) return this.blockProgram(bot, "Cargo already full", false);
+    if (deposit.remaining <= 0) return this.blockProgram(bot, "Deposit depleted", true);
+    if (bot.battery <= 0.25) return this.blockProgram(bot, "Insufficient energy", false);
+    program.runtime.elapsed += delta;
+    bot.battery = Math.max(0, bot.battery - 0.65 * delta);
+    bot.status = `Mining ${deposit.name} // ${inventoryTotal(bot.inventory)}/${bot.inventoryCapacity}`;
+    if (program.runtime.elapsed >= 2.6) {
+      program.runtime.elapsed -= 2.6;
       deposit.remaining -= 1;
-      addItem(bot.inventory, "ironOre", 1);
-      if (!canFit(bot.inventory, bot.inventoryCapacity)) {
+      addItem(bot.inventory, deposit.itemId, 1);
+      if (inventoryTotal(bot.inventory) >= bot.inventoryCapacity || deposit.remaining <= 0) {
         deposit.reservedBy = undefined;
-        program.targetId = undefined;
-        program.phase = "deliver";
+        program.currentTargetId = undefined;
+        clearBotPath(bot, "Mining complete");
+        return "complete";
       }
     }
+    return "running";
   }
 
-  private updateHaulerProgram(bot: BotEntity, program: BotProgram, delta: number): void {
-    if (inventoryTotal(bot.inventory) > 0 || program.phase === "deliverStorage") {
-      const storage = this.findBuilding("storage");
-      if (!storage || inventoryTotal(storage.input) >= BUILDINGS.storage.inputCapacity) {
-        program.phase = "deliverStorage";
-        program.blockedReason = storage ? "Field Storage is full" : "No completed Field Storage";
-        bot.status = `Blocked: ${program.blockedReason}`;
-        bot.blockingReason = program.blockedReason;
-        return;
-      }
-      program.phase = "deliverStorage";
-      program.currentStep = 2;
-      bot.task = { kind: "program", label: "Factory Hauler: delivering to storage", targetId: storage.id, progress: 0, duration: 0 };
-      if (!this.moveToward(bot, interactionPoint(storage, "input"), delta)) return;
-      for (const itemId of Object.keys(bot.inventory) as ItemId[]) {
-        transferItem(bot.inventory, storage.input, BUILDINGS.storage.inputCapacity, itemId, 99);
-      }
-      this.state.flags.autonomousLoop = itemCount(storage.input, "ironIngot") > 0 && this.hasRunningProgram("ironMiner");
-      this.releaseBotClaims(bot.id);
-      program.phase = "acquire";
-      program.currentStep = 4;
-      program.targetId = undefined;
-      bot.blockingReason = "";
-      return;
+  private executeClaimSupplyRequest(bot: BotEntity, program: BotProgram, command: ProgramCommand): "complete" | "blocked" {
+    const itemId = command.parameters.itemId ?? "ironOre";
+    if (itemCount(bot.inventory, itemId) <= 0) return this.blockProgram(bot, "Cargo does not contain the requested item", true);
+    const matching = Object.values(this.state.logisticsRequests).filter(
+      (request) => request.active && request.type === "buildingInput" && request.itemId === itemId,
+    );
+    if (matching.length === 0) return this.blockProgram(bot, "No matching request", true);
+    const open = matching.filter((request) => request.state === "open" || request.claimedBy === bot.id);
+    if (open.length === 0) return this.blockProgram(bot, "All matching requests claimed", true);
+    for (const request of open.sort((a, b) => a.id.localeCompare(b.id))) {
+      const destination = this.state.buildings[request.buildingId];
+      if (!destination || resolveInteractionPath(this.state, bot.position, destination, "input").path.length === 0) continue;
+      const quantity = Math.min(request.quantity, itemCount(bot.inventory, itemId));
+      if (quantity <= 0 || !this.claimRequest(request, bot, bot.id, destination.id, quantity)) continue;
+      program.currentRequestId = request.id;
+      program.currentReservationId = `reservation:${request.id}:${bot.id}`;
+      program.currentTargetId = destination.id;
+      clearBotPath(bot, "Supply request claimed");
+      return "complete";
     }
+    return this.blockProgram(bot, "No reachable destination", true);
+  }
 
-    let request = program.claimId ? this.state.logisticsRequests[program.claimId] : undefined;
-    if (!request?.active || (request.claimedBy && request.claimedBy !== bot.id)) {
-      request = Object.values(this.state.logisticsRequests).find(
-        (candidate) => candidate.active && candidate.type === "buildingOutput" && !candidate.claimedBy,
+  private executeClaimOutputRequest(bot: BotEntity, program: BotProgram, command: ProgramCommand): "complete" | "blocked" {
+    const matching = Object.values(this.state.logisticsRequests).filter(
+      (request) =>
+        request.active &&
+        request.type === "buildingOutput" &&
+        (!command.parameters.itemId || request.itemId === command.parameters.itemId),
+    );
+    if (matching.length === 0) return this.blockProgram(bot, "No output request available", true);
+    const storage = Object.values(this.state.buildings).find(
+      (building) => building.complete && building.type === "storage" && inventoryTotal(building.input) < BUILDINGS.storage.inputCapacity,
+    );
+    if (!storage) return this.blockProgram(bot, "No compatible storage destination", true);
+    for (const request of matching.filter((entry) => entry.state === "open").sort((a, b) => a.id.localeCompare(b.id))) {
+      const source = this.state.buildings[request.buildingId];
+      if (!source) continue;
+      const sourceRoute = resolveInteractionPath(this.state, bot.position, source, "output");
+      const destinationRoute = resolveInteractionPath(this.state, sourceRoute.interactionDestination ?? bot.position, storage, "input");
+      if (sourceRoute.path.length === 0 || destinationRoute.path.length === 0) continue;
+      const quantity = Math.min(
+        availableOutput(this.state, source, request.itemId),
+        bot.inventoryCapacity - inventoryTotal(bot.inventory),
+        BUILDINGS.storage.inputCapacity - inventoryTotal(storage.input),
       );
-      if (!request || !this.claimRequest(request, bot)) {
-        program.blockedReason = "No pickup request available";
-        bot.status = "Idle: Waiting for finished furnace output";
-        bot.blockingReason = program.blockedReason;
-        program.currentStep = 0;
-        return;
-      }
-      program.claimId = request.id;
-      program.targetId = request.buildingId;
-      program.phase = "collect";
+      if (quantity <= 0) continue;
+      if (!this.claimRequest(request, bot, source.id, storage.id, quantity)) continue;
+      request.state = "awaitingPickup";
+      request.destinationId = storage.id;
+      program.currentRequestId = request.id;
+      program.currentReservationId = `reservation:${request.id}:${bot.id}`;
+      program.currentTargetId = source.id;
+      clearBotPath(bot, "Output request claimed");
+      return "complete";
     }
-    const building = this.state.buildings[request.buildingId];
-    if (!building) {
-      this.releaseBotClaims(bot.id);
-      program.phase = "acquire";
-      return;
-    }
-    program.currentStep = 1;
-    bot.task = { kind: "program", label: `Factory Hauler: collecting ${request.itemId}`, targetId: building.id, progress: 0, duration: 0 };
-    if (!this.moveToward(bot, interactionPoint(building, "output"), delta)) return;
-    transferItem(building.output, bot.inventory, bot.inventoryCapacity, request.itemId, request.quantity);
-    request.active = false;
-    program.phase = "deliverStorage";
+    return this.blockProgram(bot, "Output already reserved or unreachable", true);
   }
 
-  private moveToward(bot: BotEntity, destination: GridPoint, delta: number): boolean {
-    const remaining = distance(bot.position, destination);
-    if (remaining < 0.05) {
-      bot.position = { ...destination };
-      return true;
+  private executeCollectReserved(bot: BotEntity, program: BotProgram): "complete" | "blocked" {
+    const reservation = this.currentReservation(program);
+    if (!reservation || reservation.state !== "reserved") return this.blockProgram(bot, "No active reservation", false);
+    const request = this.state.logisticsRequests[reservation.requestId];
+    const source = this.state.buildings[reservation.sourceId];
+    if (!request || !source) return this.blockProgram(bot, "Source invalid", false);
+    if (!isBotAtInteraction(bot) || bot.path.targetId !== source.id) return this.blockProgram(bot, "Not at pickup", false);
+    const available = itemCount(source.output, reservation.itemId);
+    if (available <= 0) return this.blockProgram(bot, "Reserved items missing", false);
+    if (inventoryTotal(bot.inventory) >= bot.inventoryCapacity) return this.blockProgram(bot, "Cargo full", false);
+    const moved = transferItem(source.output, bot.inventory, bot.inventoryCapacity, reservation.itemId, reservation.quantity);
+    if (moved <= 0) return this.blockProgram(bot, "Reserved items missing", false);
+    reservation.quantity = moved;
+    reservation.collectedQuantity = moved;
+    reservation.state = "inTransit";
+    request.state = "inTransit";
+    request.quantity = moved;
+    program.currentTargetId = reservation.destinationId;
+    clearBotPath(bot, "Pickup complete; destination selected");
+    bot.battery = Math.max(0, bot.battery - moved * 0.15);
+    return "complete";
+  }
+
+  private executeDeliverReserved(bot: BotEntity, program: BotProgram): "complete" | "blocked" {
+    const reservation = this.currentReservation(program);
+    if (!reservation || reservation.state !== "inTransit") return this.blockProgram(bot, "No in-transit reservation", false);
+    const request = this.state.logisticsRequests[reservation.requestId];
+    const destination = this.state.buildings[reservation.destinationId];
+    if (!request || !destination) return this.blockProgram(bot, "Destination invalid", false);
+    if (!isBotAtInteraction(bot) || bot.path.targetId !== destination.id) return this.blockProgram(bot, "Not at destination", false);
+    if (itemCount(bot.inventory, reservation.itemId) <= 0) return this.blockProgram(bot, "Cargo no longer contains the reserved item", false);
+    const capacity = BUILDINGS[destination.type].inputCapacity;
+    const moved = transferItem(bot.inventory, destination.input, capacity, reservation.itemId, reservation.quantity);
+    if (moved <= 0) return this.blockProgram(bot, "Destination full", true);
+    reservation.deliveredQuantity += moved;
+    if (reservation.itemId === "ironIngot" && destination.type === "storage") {
+      this.state.automation.ironIngotsDelivered += moved;
+      this.state.automation.lastDeliveryAt = this.state.gameTime;
     }
-    const amount = Math.min(remaining, BOT_FRAMES[bot.frame].moveSpeed * delta);
-    bot.position.x += ((destination.x - bot.position.x) / remaining) * amount;
-    bot.position.y += ((destination.y - bot.position.y) / remaining) * amount;
-    bot.battery = Math.max(0, bot.battery - 0.12 * amount);
-    return false;
+    if (reservation.deliveredQuantity < reservation.quantity) return this.blockProgram(bot, "Destination full", true);
+    completeReservation(this.state, reservation, request);
+    program.currentReservationId = undefined;
+    program.currentRequestId = undefined;
+    program.currentTargetId = undefined;
+    clearBotPath(bot, "Delivery complete");
+    bot.battery = Math.max(0, bot.battery - moved * 0.12);
+    return "complete";
+  }
+
+  private executeDeliverCargo(bot: BotEntity, program: BotProgram, command: ProgramCommand): "complete" | "blocked" {
+    const reservation = this.currentReservation(program);
+    const request = program.currentRequestId ? this.state.logisticsRequests[program.currentRequestId] : undefined;
+    const destination = request ? this.state.buildings[request.buildingId] : undefined;
+    if (!reservation || !request || !destination) return this.blockProgram(bot, "No claimed building-input request", false);
+    if (!isBotAtInteraction(bot) || bot.path.targetId !== destination.id) return this.blockProgram(bot, "Not at destination", false);
+    const itemId = command.parameters.itemId ?? request.itemId;
+    if (itemCount(bot.inventory, itemId) <= 0) return this.blockProgram(bot, "Cargo no longer contains the requested item", false);
+    const moved = transferItem(bot.inventory, destination.input, BUILDINGS[destination.type].inputCapacity, itemId, reservation.quantity);
+    if (moved <= 0) return this.blockProgram(bot, "Destination full", true);
+    reservation.collectedQuantity = moved;
+    reservation.deliveredQuantity = moved;
+    completeReservation(this.state, reservation, request);
+    program.currentReservationId = undefined;
+    program.currentRequestId = undefined;
+    program.currentTargetId = undefined;
+    clearBotPath(bot, "Cargo delivered");
+    bot.battery = Math.max(0, bot.battery - moved * 0.12);
+    return "complete";
+  }
+
+  private executeRecharge(
+    bot: BotEntity,
+    program: BotProgram,
+    command: ProgramCommand,
+    delta: number,
+  ): "running" | "complete" | "blocked" {
+    const startThreshold = command.parameters.startThreshold ?? 25;
+    const resumeThreshold = command.parameters.resumeThreshold ?? 90;
+    if (program.runtime.phase !== "charging" && program.runtime.phase !== "travellingToCharge" && batteryPercent(bot) >= startThreshold) {
+      return "complete";
+    }
+    let station = program.currentTargetId ? this.state.buildings[program.currentTargetId] : undefined;
+    if (station?.type !== "chargingStation" || (station.chargingBotId && station.chargingBotId !== bot.id)) station = undefined;
+    if (!station) {
+      const allStations = Object.values(this.state.buildings).filter((building) => building.complete && building.type === "chargingStation");
+      if (allStations.length === 0) return this.blockProgram(bot, "No Charging Station exists", true);
+      const freeStations = allStations.filter((building) => !building.chargingBotId || building.chargingBotId === bot.id);
+      if (freeStations.length === 0) return this.blockProgram(bot, "All charging docks occupied", true);
+      station = reachableChargingStations(this.state, bot)[0];
+      if (!station) return this.blockProgram(bot, "No reachable Charging Station", false);
+      const route = resolveInteractionPath(this.state, bot.position, station, "charging");
+      const energyNeeded = Math.max(0, route.path.length - 1) * 0.22;
+      if (bot.battery <= energyNeeded) return this.blockProgram(bot, "Battery is too low to reach the station", false);
+      station.chargingBotId = bot.id;
+      program.runtime.suspendedTargetId = program.currentTargetId;
+      program.currentTargetId = station.id;
+      program.runtime.phase = "travellingToCharge";
+      clearBotPath(bot, "Charging dock claimed");
+    }
+    if (program.runtime.phase === "travellingToCharge") {
+      const needsPlan = bot.path.targetId !== station.id || bot.path.interaction !== "charging" || bot.path.status === "idle" || bot.path.status === "blocked";
+      if (needsPlan && !planBotPath(this.state, bot, station, "charging", "Charging dock claimed")) {
+        station.chargingBotId = undefined;
+        return this.blockProgram(bot, "No reachable Charging Station", false);
+      }
+      const result = followBotPath(this.state, bot, delta);
+      bot.task.destination = bot.path.interactionDestination;
+      bot.status = `Travelling to charging dock // ${bot.path.currentIndex}/${bot.path.tiles.length - 1}`;
+      if (result === "blocked") return this.blockProgram(bot, bot.path.repathReason || "No reachable Charging Station", false);
+      if (result !== "arrived") return "running";
+      program.runtime.phase = "charging";
+    }
+    if (station.power <= 0) return this.blockProgram(bot, "Charging Station has no energy", true);
+    const charge = Math.min(CHARGE_RATE * delta, station.power, bot.maxBattery - bot.battery);
+    station.power -= charge;
+    bot.battery += charge;
+    station.chargingProgress = batteryPercent(bot);
+    bot.status = `Charging // ${Math.floor(batteryPercent(bot))}%`;
+    if (batteryPercent(bot) < resumeThreshold) return "running";
+    station.chargingBotId = undefined;
+    station.chargingProgress = 0;
+    program.currentTargetId = program.runtime.suspendedTargetId;
+    program.runtime.suspendedTargetId = undefined;
+    clearBotPath(bot, "Charge complete");
+    return "complete";
+  }
+
+  private completeProgramCommand(bot: BotEntity, command: ProgramCommand): void {
+    const program = bot.program;
+    if (!program) return;
+    command.runtimeStatus = command.kind === "repeat" ? "pending" : "completed";
+    program.lastCompletedCommandId = command.id;
+    program.instructionPointer += 1;
+    program.currentCommandId = program.commands[program.instructionPointer]?.id;
+    program.runtime.elapsed = 0;
+    program.runtime.phase = "idle";
+    program.runtime.lastTransitionTick = this.state.tick;
+    program.blockingReason = "";
+    program.blockedReason = "";
+    bot.blockingReason = "";
+    this.syncProgramReadout(program);
+  }
+
+  private blockProgram(bot: BotEntity, reason: string, retryable: boolean): "blocked" {
+    const program = bot.program;
+    if (!program) return "blocked";
+    const command = program.commands[program.instructionPointer];
+    if (command) command.runtimeStatus = retryable ? "waiting" : "blocked";
+    program.blockingReason = reason;
+    program.blockedReason = reason;
+    program.lastFailure = reason;
+    bot.blockingReason = reason;
+    bot.status = `${retryable ? "Waiting" : "Blocked"}: ${reason}`;
+    if (!retryable) {
+      program.running = false;
+      this.releaseBotClaims(bot.id);
+      bot.task = clone(IDLE_TASK);
+    }
+    this.syncProgramReadout(program);
+    return "blocked";
+  }
+
+  private currentReservation(program: BotProgram): Reservation | undefined {
+    return program.currentReservationId ? this.state.reservations[program.currentReservationId] : undefined;
+  }
+
+  private interactionForProgramTarget(program: BotProgram, target: SelectableEntity) {
+    if (target.kind === "deposit") return "deposit" as const;
+    if (target.kind !== "building") return "input" as const;
+    if (target.type === "chargingStation") return "charging" as const;
+    const reservation = this.currentReservation(program);
+    if (reservation?.sourceId === target.id && reservation.state === "reserved" && reservation.sourceId !== reservation.botId) {
+      return "output" as const;
+    }
+    return "input" as const;
+  }
+
+  private syncProgramReadout(program: BotProgram): void {
+    program.currentStep = program.instructionPointer;
+    program.phase = program.runtime.phase;
+    program.targetId = program.currentTargetId;
+    program.claimId = program.currentRequestId;
+    program.blockedReason = program.blockingReason;
+  }
+
+  private resetProgramRuntime(bot: BotEntity, releaseClaims = false): void {
+    const program = bot.program;
+    if (!program) return;
+    if (releaseClaims) this.releaseBotClaims(bot.id);
+    for (const command of program.commands) command.runtimeStatus = "pending";
+    program.instructionPointer = 0;
+    program.currentCommandId = program.commands[0]?.id;
+    program.runtime = { elapsed: 0, phase: "idle", zeroDurationTransitions: 0, lastTransitionTick: this.state.tick };
+    program.blockingReason = "";
+    program.blockedReason = "";
+    program.lastFailure = undefined;
+    bot.blockingReason = "";
+    bot.task = { kind: "program", label: `${program.name}: ready`, progress: 0, duration: 0 };
+    this.syncProgramReadout(program);
+  }
+
+  private updateAutomationProgress(delta: number): void {
+    const minerRunning = this.hasRunningProgram("ironMiner");
+    const haulerRunning = this.hasRunningProgram("factoryHauler");
+    this.state.flags.minerRunning = minerRunning;
+    if (minerRunning && haulerRunning && this.state.automation.ironIngotsDelivered > 0) {
+      this.state.automation.productiveSeconds += delta;
+    } else if (!minerRunning || !haulerRunning) {
+      this.state.automation.productiveSeconds = 0;
+    }
+    this.state.automation.completed =
+      minerRunning &&
+      haulerRunning &&
+      this.state.automation.ironIngotsDelivered >= 3 &&
+      this.state.automation.productiveSeconds >= 30;
+    this.state.flags.autonomousLoop = this.state.automation.completed;
   }
 
   private refreshRequests(): void {
@@ -1107,6 +1490,8 @@ export class Simulation {
               buildingId: building.id,
               itemId,
               quantity: quantity - delivered,
+              reservedQuantity: 0,
+              state: "open",
               active: true,
               label: `Construction needs ${quantity - delivered} ${itemId}`,
             });
@@ -1125,6 +1510,8 @@ export class Simulation {
             buildingId: building.id,
             itemId: "ironOre",
             quantity: needed,
+            reservedQuantity: 0,
+            state: "open",
             active: true,
             label: `Needs ${needed} Iron Ore`,
           });
@@ -1139,6 +1526,9 @@ export class Simulation {
             buildingId: building.id,
             itemId: "ironIngot",
             quantity: available,
+            reservedQuantity: 0,
+            state: "open",
+            sourceId: building.id,
             active: true,
             label: `${available} Iron Ingot ready`,
           });
@@ -1155,6 +1545,8 @@ export class Simulation {
               buildingId: building.id,
               itemId,
               quantity: 1,
+              reservedQuantity: 0,
+              state: "open",
               active: true,
               label: `Reserved ${itemId} en route`,
             });
@@ -1164,29 +1556,62 @@ export class Simulation {
     }
     for (const request of Object.values(this.state.logisticsRequests)) {
       if (!activeIds.has(request.id)) {
+        if (["claimed", "awaitingPickup", "inTransit"].includes(request.state)) continue;
         request.active = false;
-        if (request.claimedBy) this.releaseBotClaims(request.claimedBy);
+        if (request.state !== "completed") request.state = "cancelled";
       }
     }
   }
 
   private upsertRequest(next: LogisticsRequest): void {
     const existing = this.state.logisticsRequests[next.id];
-    this.state.logisticsRequests[next.id] = existing ? { ...next, claimedBy: existing.claimedBy } : next;
+    if (!existing || ["completed", "cancelled", "invalid"].includes(existing.state)) {
+      this.state.logisticsRequests[next.id] = next;
+      return;
+    }
+    if (existing.state !== "open") {
+      existing.active = true;
+      return;
+    }
+    this.state.logisticsRequests[next.id] = {
+      ...next,
+      sourceId: existing.sourceId ?? next.sourceId,
+      destinationId: existing.destinationId ?? next.destinationId,
+      claimedBy: existing.claimedBy,
+      reservedQuantity: existing.reservedQuantity,
+      state: existing.state,
+    };
   }
 
-  private claimRequest(request: LogisticsRequest, bot: BotEntity): boolean {
+  private claimRequest(
+    request: LogisticsRequest,
+    bot: BotEntity,
+    sourceId = request.buildingId,
+    destinationId = this.findBuilding("storage")?.id ?? request.buildingId,
+    requestedQuantity = Math.min(request.quantity, bot.inventoryCapacity - inventoryTotal(bot.inventory)),
+  ): boolean {
+    if (!request.active || (request.state !== "open" && request.claimedBy !== bot.id)) return false;
     if (request.claimedBy && request.claimedBy !== bot.id) return false;
+    const quantity = Math.max(0, Math.min(request.quantity, requestedQuantity));
+    if (quantity <= 0) return false;
     request.claimedBy = bot.id;
-    const id = `reservation:${request.id}`;
+    request.state = "claimed";
+    request.reservedQuantity = quantity;
+    request.sourceId = sourceId;
+    request.destinationId = destinationId;
+    request.label = `${request.label} // ${quantity} reserved`;
+    const id = `reservation:${request.id}:${bot.id}`;
     this.state.reservations[id] = {
       id,
       requestId: request.id,
       botId: bot.id,
       itemId: request.itemId,
-      quantity: Math.min(request.quantity, bot.inventoryCapacity),
-      sourceId: request.buildingId,
-      destinationId: this.findBuilding("storage")?.id ?? "",
+      quantity,
+      sourceId,
+      destinationId,
+      state: "reserved",
+      collectedQuantity: 0,
+      deliveredQuantity: 0,
     };
     return true;
   }
@@ -1196,13 +1621,27 @@ export class Simulation {
       if (deposit.reservedBy === botId) deposit.reservedBy = undefined;
     }
     for (const request of Object.values(this.state.logisticsRequests)) {
-      if (request.claimedBy === botId) request.claimedBy = undefined;
+      if (request.claimedBy === botId) {
+        request.claimedBy = undefined;
+        request.reservedQuantity = 0;
+        request.state = request.active ? "open" : "cancelled";
+      }
     }
-    for (const [id, reservation] of Object.entries(this.state.reservations)) {
-      if (reservation.botId === botId) delete this.state.reservations[id];
+    for (const reservation of Object.values(this.state.reservations)) {
+      if (reservation.botId === botId) releaseReservation(this.state, reservation);
+    }
+    for (const station of Object.values(this.state.buildings)) {
+      if (station.type === "chargingStation" && station.chargingBotId === botId) station.chargingBotId = undefined;
     }
     const bot = this.state.bots[botId];
-    if (bot?.program) bot.program.claimId = undefined;
+    if (bot?.program) {
+      bot.program.currentRequestId = undefined;
+      bot.program.currentReservationId = undefined;
+      bot.program.currentTargetId = undefined;
+      bot.program.claimId = undefined;
+      bot.program.targetId = undefined;
+    }
+    if (bot) clearBotPath(bot, "Claims released");
   }
 
   private updateObjectives(): void {
@@ -1237,9 +1676,9 @@ export class Simulation {
       case 9:
         return this.state.flags.firstBotBuilt;
       case 10:
-        return this.state.flags.minerRunning && this.state.flags.observedOutputFull;
+        return this.state.flags.chargingStationBuilt && this.state.flags.minerRunning && this.state.flags.observedOutputFull;
       case 11:
-        return this.state.flags.autonomousLoop;
+        return this.state.automation.completed;
       default:
         return false;
     }
@@ -1250,18 +1689,31 @@ export class Simulation {
     if (type === "researchBench") this.state.flags.builtBench = true;
     if (type === "furnace") this.state.flags.furnaceBuilt = true;
     if (type === "botCradle") this.state.flags.cradleBuilt = true;
+    if (type === "chargingStation") this.state.flags.chargingStationBuilt = true;
   }
 
-  private beginMove(bot: BotEntity, destination: GridPoint, nextTask: BotTask): void {
+  private beginMove(
+    bot: BotEntity,
+    target: SelectableEntity,
+    interaction: "deposit" | "input" | "output" | "operator" | "construction" | "charging",
+    nextTask: BotTask,
+  ): boolean {
+    if (!planBotPath(this.state, bot, target, interaction, "Player order")) {
+      bot.status = `Blocked: ${bot.path.repathReason}`;
+      bot.blockingReason = bot.path.repathReason;
+      return false;
+    }
     bot.task = {
       ...nextTask,
       kind: "moving",
-      destination: { ...destination },
+      destination: bot.path.interactionDestination ? { ...bot.path.interactionDestination } : undefined,
       nextKind: nextTask.kind,
+      interaction,
       progress: 0,
     };
     bot.status = `Moving // ${nextTask.label}`;
     bot.blockingReason = "";
+    return true;
   }
 
   private cancelBotTask(bot: BotEntity): void {
@@ -1304,15 +1756,6 @@ export class Simulation {
       .sort((a, b) => distance(a.position, position) - distance(b.position, position))[0];
   }
 
-  private findBestFurnace(): BuildingEntity | undefined {
-    return Object.values(this.state.buildings).find(
-      (building) =>
-        building.complete &&
-        building.type === "furnace" &&
-        inventoryTotal(building.input) < BUILDINGS.furnace.inputCapacity,
-    );
-  }
-
   private hasRunningProgram(templateId: ProgramTemplateId): boolean {
     return Object.values(this.state.bots).some(
       (bot) => bot.program?.templateId === templateId && bot.program.running,
@@ -1341,4 +1784,4 @@ export function createTestSimulation(): Simulation {
   return new Simulation();
 }
 
-export { PROGRAMS };
+export { PROGRAM_TEMPLATES as PROGRAMS };

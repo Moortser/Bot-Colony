@@ -611,6 +611,15 @@ button:disabled {
   box-shadow: 3px -13px #4d726a, 31px -13px #4d726a;
 }
 
+.build-glyph.chargingStation::after {
+  left: 29px;
+  width: 18px;
+  height: 24px;
+  background: #416f69;
+  border-top-color: #7da492;
+  box-shadow: -13px 17px #d5aa43;
+}
+
 .context-window {
   top: 10px;
   right: 10px;
@@ -703,6 +712,10 @@ button:disabled {
 
 .building-summary.botCradle .summary-glyph::before {
   background: #6f7364;
+}
+
+.building-summary.chargingStation .summary-glyph::before {
+  background: #46756f;
 }
 
 .deposit-summary .summary-glyph::before,
@@ -882,7 +895,7 @@ button:disabled {
   display: grid;
   min-height: 25px;
   padding: 3px;
-  grid-template-columns: 20px 1fr 22px 22px;
+  grid-template-columns: 20px 1fr 24px 24px 24px;
   align-items: center;
   border-top: 1px solid #404942;
   gap: 2px;
@@ -895,10 +908,94 @@ button:disabled {
   box-shadow: inset 2px 0 var(--amber);
 }
 
+.program-row > b small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.program-row.completed > b small {
+  color: #75a978;
+}
+
+.program-row.waiting > b small,
+.program-row.blocked > b small {
+  color: #ef9b88;
+}
+
 .program-row button {
+  min-height: 24px;
   color: var(--beige);
   background: #2e3733;
   border: 1px solid #5c665d;
+}
+
+.program-params {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.program-params label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.program-params select,
+.program-params input,
+.program-add select {
+  width: 100%;
+  min-height: 26px;
+  padding: 3px;
+  color: var(--beige);
+  background: #202824;
+  border: 1px solid #59655c;
+  font: inherit;
+  font-size: 7px;
+}
+
+.program-readout {
+  display: grid;
+  margin-top: 6px;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 7px;
+  font-size: 7px;
+}
+
+.program-readout span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.program-readout b {
+  overflow: hidden;
+  max-width: 92px;
+  color: var(--beige);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.program-add {
+  display: grid;
+  margin-top: 7px;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+}
+
+.program-add button {
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 7px;
+}
+
+.automation-progress {
+  color: var(--amber-light);
 }
 
 .request-row {

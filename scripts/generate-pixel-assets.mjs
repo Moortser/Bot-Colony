@@ -359,7 +359,7 @@ function storageFrame(frame) {
 
 function supportBuildingFrame(kind) {
   const image = new Image(192, 128);
-  storageBase(image);
+  if (kind <= 2) storageBase(image);
   if (kind === 0) {
     image.rect(62, 48, 68, 35, P.teal0); image.rect(67, 42, 58, 10, P.steel2);
     image.rect(75, 45, 34, 4, P.blueHi); image.rect(119, 39, 6, 7, P.amber);
@@ -373,6 +373,26 @@ function supportBuildingFrame(kind) {
     image.line(54, 79, 72, 36, P.steelHi, 7); image.line(139, 78, 119, 30, P.steelHi, 7);
     image.line(72, 36, 119, 30, P.teal1, 8); image.rect(82, 54, 30, 20, P.steel0);
     image.rect(92, 48, 10, 6, P.blueHi);
+  }
+  if (kind >= 3) {
+    image.ellipse(96, 102, 49, 13, P.shadow);
+    image.polygon([[53, 78], [91, 59], [139, 82], [98, 104]], P.steel0);
+    image.polygon([[53, 78], [98, 104], [98, 111], [53, 86]], P.soil0);
+    image.polygon([[139, 82], [98, 104], [98, 111], [139, 89]], P.teal0);
+    image.outline([[53, 78], [91, 59], [139, 82], [98, 104]], P.outline, 2);
+    image.rect(91, 35, 28, 46, P.steel0);
+    image.rect(96, 30, 23, 49, P.teal0);
+    image.rect(100, 38, 14, 24, P.outline);
+    image.rect(103, 42, 8, 16, kind === 5 ? P.blueHi : kind === 4 ? P.amber : P.green);
+    image.rect(104, 65, 6, 5, kind === 3 ? P.green : P.amberHi);
+    image.line(92, 75, 73, 86, P.outline, 3);
+    image.line(73, 86, 65, 83, kind === 5 ? P.blueHi : P.steel2, 2);
+    image.rect(59, 79, 12, 8, P.steel1);
+    image.rect(62, 80, 6, 4, kind === 5 ? P.blueHi : kind === 4 ? P.amber : P.steelHi);
+    if (kind === 5) {
+      image.pixel(57, 74, P.blueHi); image.pixel(70, 71, P.amberHi); image.pixel(76, 79, P.blueHi);
+      image.line(80, 70, 87, 63, P.blueHi, 2);
+    }
   }
   return image;
 }
@@ -448,7 +468,7 @@ writeSheet("deposits.png", [
   depositFrame("copper", 0), depositFrame("copper", 1), depositFrame("copper", 2),
 ]);
 writeSheet("field-storage.png", Array.from({ length: 6 }, (_, index) => storageFrame(index)));
-writeSheet("support-buildings.png", Array.from({ length: 3 }, (_, index) => supportBuildingFrame(index)));
+writeSheet("support-buildings.png", Array.from({ length: 6 }, (_, index) => supportBuildingFrame(index)));
 writeSheet("cargo.png", Array.from({ length: 4 }, (_, index) => cargoFrame(index)));
 writeSheet("activity-fx.png", Array.from({ length: 6 }, (_, index) => effectFrame(index)));
 writeSheet("ui-icons.png", Array.from({ length: 12 }, (_, index) => iconFrame(index)));

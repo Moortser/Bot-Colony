@@ -3,12 +3,16 @@ import { UI_ICON_FRAMES } from "../game/assets/manifest";
 import { replaceSimulation, runtime } from "../runtime";
 import { inventoryTotal, itemCount } from "../simulation/inventory";
 import { Simulation } from "../simulation/simulation";
+import { BASIC_BRAIN_COMMANDS } from "../simulation/programs/templates";
 import type {
   BotEntity,
   BuildingEntity,
   BuildingTypeId,
   Inventory,
   ItemId,
+  ProgramCommand,
+  ProgramCommandParameters,
+  ProgramCommandType,
   ResearchId,
   SelectableEntity,
 } from "../simulation/types";
@@ -117,6 +121,7 @@ export class AppUi {
       </div>
     `;
     app.addEventListener("click", (event) => this.handleClick(event));
+    app.addEventListener("change", (event) => this.handleChange(event));
     app.addEventListener("pointerdown", (event) => {
       if ((event.target as HTMLElement).closest(".chrome-surface")) {
         this.chromePointerHeld = true;
@@ -251,6 +256,7 @@ export class AppUi {
          this.objectiveExpanded
            ? `<div class="objective-detail">
                 <p>${complete ? "The colony can now mine, refine, and store iron without individual orders." : escapeHtml(objective?.detail ?? "")}</p>
+                ${state.objectiveIndex === OBJECTIVES.length - 1 ? `<p class="automation-progress">AUTOMATED FE ${state.automation.ironIngotsDelivered}/3 // SUSTAINED ${Math.floor(state.automation.productiveSeconds)}/30s</p>` : ""}
                 <div class="objective-track"><i style="width:${((state.objectiveIndex + (complete ? 1 : 0)) / OBJECTIVES.length) * 100}%"></i></div>
               </div>`
            : ""
@@ -306,13 +312,18 @@ export class AppUi {
   private botSelection(bot: BotEntity): string {
     const taskProgress = bot.task.duration > 0 ? progress(bot.task.progress, bot.task.duration) : "";
     const program = bot.program;
+    const request = program?.currentRequestId ? runtime.simulation.state.logisticsRequests[program.currentRequestId] : undefined;
+    const reservation = program?.currentReservationId ? runtime.simulation.state.reservations[program.currentReservationId] : undefined;
+    const target = program?.currentTargetId ? runtime.simulation.getEntity(program.currentTargetId) : undefined;
     const programRows = program
       ? `<div class="program-list">${program.commands
           .map(
-            (command, index) => `<div class="program-row ${index === program.currentStep ? "active" : ""}">
-              <span>${String(index + 1).padStart(2, "0")}</span><b>${escapeHtml(command.label)}</b>
+            (command, index) => `<div class="program-row ${command.runtimeStatus} ${index === program.instructionPointer ? "active" : ""}">
+              <span>${String(index + 1).padStart(2, "0")}</span><b>${escapeHtml(command.label)}<small>${command.runtimeStatus.toUpperCase()}</small></b>
               <button data-action="program-up" data-index="${index}" aria-label="Move command up">^</button>
               <button data-action="program-down" data-index="${index}" aria-label="Move command down">v</button>
+              <button data-action="program-remove" data-index="${index}" aria-label="Remove command">X</button>
+              ${this.programParameterEditor(command, index)}
             </div>`,
           )
           .join("")}</div>`
@@ -334,11 +345,61 @@ export class AppUi {
               <div class="mini-button-grid">
                 <button data-action="assign-program" data-program="ironMiner">IRON MINER</button>
                 <button data-action="assign-program" data-program="factoryHauler">FACTORY HAULER</button>
-                ${program?.running ? '<button class="danger" data-action="stop-program">STOP PROGRAM</button>' : ""}
-              </div>${programRows}${program?.blockedReason ? `<p class="blocking-copy">${escapeHtml(program.blockedReason)}</p>` : ""}
+                ${program ? `<button data-action="restart-program">RESTART</button>${program.running ? '<button class="danger" data-action="stop-program">STOP PROGRAM</button>' : '<button data-action="start-program">START PROGRAM</button>'}` : ""}
+              </div>
+              ${
+                program
+                  ? `<div class="program-readout">
+                       <span>COMMAND <b>${program.instructionPointer + 1}/${program.commands.length}</b></span>
+                       <span>LOOPS <b>${program.loopCount}</b></span>
+                       <span>TARGET <b>${escapeHtml(target?.name ?? "--")}</b></span>
+                       <span>REQUEST <b>${escapeHtml(request ? `${request.state}: ${request.label}` : "--")}</b></span>
+                       <span>RESERVED <b>${escapeHtml(reservation ? `${reservation.itemId} x${reservation.quantity} / ${reservation.state}` : "--")}</b></span>
+                       <span>PATH <b>${bot.path.status} ${bot.path.currentIndex}/${Math.max(0, bot.path.tiles.length - 1)}</b></span>
+                     </div>`
+                  : ""
+              }
+              ${programRows}
+              ${
+                program
+                  ? `<div class="program-add"><select id="program-command-add">${BASIC_BRAIN_COMMANDS.map((entry) => `<option value="${entry.kind}">${escapeHtml(entry.label)}</option>`).join("")}</select><button data-action="program-add">ADD COMMAND</button></div>`
+                  : ""
+              }
+              ${program?.blockingReason ? `<p class="blocking-copy">Blocked: ${escapeHtml(program.blockingReason)}</p>` : ""}
             </section>`
           : ""
       }`;
+  }
+
+  private programParameterEditor(command: ProgramCommand, index: number): string {
+    const select = (parameter: keyof ProgramCommandParameters, value: string, values: Array<[string, string]>) =>
+      `<label>${parameter}<select data-program-index="${index}" data-program-parameter="${parameter}">${values
+        .map(([optionValue, label]) => `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${label}</option>`)
+        .join("")}</select></label>`;
+    const number = (parameter: keyof ProgramCommandParameters, value: number, minimum: number, maximum: number) =>
+      `<label>${parameter}<input type="number" min="${minimum}" max="${maximum}" step="1" value="${value}" data-program-index="${index}" data-program-parameter="${parameter}"></label>`;
+    let controls = "";
+    if (command.kind === "findDeposit" || command.kind === "mineUntilFull") {
+      controls = select("resourceType", command.parameters.resourceType ?? "ironOre", [
+        ["ironOre", "Iron Ore"],
+        ["copperOre", "Copper Ore"],
+      ]);
+    }
+    if (["claimSupplyRequest", "claimOutputRequest", "deliverCargo"].includes(command.kind)) {
+      controls = select("itemId", command.parameters.itemId ?? "ironOre", [
+        ["ironOre", "Iron Ore"],
+        ["copperOre", "Copper Ore"],
+        ["ironIngot", "Iron Ingot"],
+        ["copperIngot", "Copper Ingot"],
+      ]);
+    }
+    if (command.kind === "rechargeIfBelow") {
+      controls =
+        number("startThreshold", command.parameters.startThreshold ?? 25, 1, 99) +
+        number("resumeThreshold", command.parameters.resumeThreshold ?? 90, 2, 100);
+    }
+    if (command.kind === "wait") controls = number("duration", command.parameters.duration ?? 2, 0, 120);
+    return controls ? `<div class="program-params">${controls}</div>` : "";
   }
 
   private buildingSelection(building: BuildingEntity): string {
@@ -360,8 +421,14 @@ export class AppUi {
                ${progress(building.constructionProgress, 1)}<div class="item-row">${itemRows(building.constructionInventory)}</div>`
         }
         ${
-          building.type === "furnace"
+        building.type === "furnace"
             ? `<label><span>IRON ORE TO INGOT</span></label>${progress(building.productionProgress, RECIPES.furnaceIron.duration)}`
+            : ""
+        }
+        ${
+          building.type === "chargingStation"
+            ? `<label><span>LOCAL POWER BUFFER</span><b>${building.power.toFixed(1)} / 100</b></label>${progress(building.power, 100)}
+               <label><span>CHARGING DOCK</span><b>${escapeHtml(building.chargingBotId ?? "AVAILABLE")}</b></label>`
             : ""
         }
       </section>
@@ -380,7 +447,7 @@ export class AppUi {
           ? `<section class="window-section"><small class="section-label">LOGISTICS</small>${requests
               .map(
                 (request) =>
-                  `<div class="request-row"><span>${escapeHtml(request.label)}</span><b>${request.claimedBy ? "CLAIMED" : "OPEN"}</b></div>`,
+                  `<div class="request-row"><span>${escapeHtml(request.label)}</span><b>${request.state.toUpperCase()}${request.reservedQuantity ? ` x${request.reservedQuantity}` : ""}</b></div>`,
               )
               .join("")}</section>`
           : ""
@@ -568,11 +635,20 @@ export class AppUi {
     if (!state.debug) return;
     const selected = runtime.simulation.getEntity(runtime.selectedId);
     const activeRequests = Object.values(state.logisticsRequests).filter((request) => request.active);
+    const path = selected?.kind === "bot" ? selected.path : undefined;
+    const requestStates = activeRequests.reduce<Record<string, number>>((summary, request) => {
+      summary[request.state] = (summary[request.state] ?? 0) + 1;
+      return summary;
+    }, {});
     element.textContent = [
       "DEBUG / AUTHORITATIVE SIMULATION",
       `tick ${state.tick} / fixed ${10 * state.speed} steps/s / time ${state.gameTime.toFixed(1)}s / speed ${state.speed}x`,
       `tile ${runtime.hoverTile ? `${runtime.hoverTile.x},${runtime.hoverTile.y}` : "--"} / selected ${selected?.id ?? "--"}`,
-      `objective ${state.objectiveIndex + 1}/${OBJECTIVES.length} / requests ${activeRequests.length} / claims ${Object.keys(state.reservations).length}`,
+      `objective ${state.objectiveIndex + 1}/${OBJECTIVES.length} / automated Fe ${state.automation.ironIngotsDelivered}/3 / sustained ${state.automation.productiveSeconds.toFixed(1)}/30s`,
+      `requests ${activeRequests.length} ${JSON.stringify(requestStates)} / reservations ${Object.keys(state.reservations).length}`,
+      `path ${path ? `${path.status} node ${path.currentIndex}/${Math.max(0, path.tiles.length - 1)} target ${path.targetId ?? "--"} / ${path.repathReason || "no repath"}` : "--"}`,
+      `deposit claims ${Object.values(state.deposits).filter((deposit) => deposit.reservedBy).map((deposit) => `${deposit.id}:${deposit.reservedBy}`).join(", ") || "--"}`,
+      `charging docks ${Object.values(state.buildings).filter((building) => building.type === "chargingStation").map((building) => `${building.id}:${building.chargingBotId ?? "open"}@${building.power.toFixed(0)}`).join(", ") || "--"}`,
     ].join("\n");
   }
 
@@ -642,8 +718,17 @@ export class AppUi {
       simulation.assignProgram(selected.id, target.dataset.program as "ironMiner" | "factoryHauler");
     }
     if (action === "stop-program" && selected?.kind === "bot") simulation.stopProgram(selected.id);
+    if (action === "start-program" && selected?.kind === "bot") simulation.startProgram(selected.id);
+    if (action === "restart-program" && selected?.kind === "bot") simulation.restartProgram(selected.id);
     if ((action === "program-up" || action === "program-down") && selected?.kind === "bot") {
       simulation.reorderProgram(selected.id, Number(target.dataset.index), action === "program-up" ? -1 : 1);
+    }
+    if (action === "program-remove" && selected?.kind === "bot") {
+      simulation.removeProgramCommand(selected.id, Number(target.dataset.index));
+    }
+    if (action === "program-add" && selected?.kind === "bot") {
+      const input = document.querySelector<HTMLSelectElement>("#program-command-add");
+      if (input) simulation.addProgramCommand(selected.id, input.value as ProgramCommandType);
     }
     if (action === "debug") simulation.toggleDebug();
     if (action === "save") {
@@ -657,6 +742,20 @@ export class AppUi {
         this.flashSystemMessage("SIMULATION STATE RESTORED");
       }
     }
+    this.render(true);
+  }
+
+  private handleChange(event: Event): void {
+    const target = event.target as HTMLInputElement | HTMLSelectElement;
+    const parameter = target.dataset.programParameter as keyof ProgramCommandParameters | undefined;
+    const index = Number(target.dataset.programIndex);
+    const selected = runtime.simulation.getEntity(runtime.selectedId);
+    if (!parameter || !Number.isFinite(index) || selected?.kind !== "bot") return;
+    const numeric = target instanceof HTMLInputElement && target.type === "number";
+    const update = {
+      [parameter]: numeric ? Number(target.value) : target.value,
+    } as ProgramCommandParameters;
+    runtime.simulation.updateProgramCommand(selected.id, index, update);
     this.render(true);
   }
 

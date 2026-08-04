@@ -33,7 +33,7 @@ export const SHEETS = [
   { key: TEXTURE_KEYS.seed, path: ASSET_PATHS.seed, frameWidth: 96, frameHeight: 96, frames: 18 },
   { key: TEXTURE_KEYS.deposits, path: ASSET_PATHS.deposits, frameWidth: 96, frameHeight: 96, frames: 6 },
   { key: TEXTURE_KEYS.storage, path: ASSET_PATHS.storage, frameWidth: 192, frameHeight: 128, frames: 6 },
-  { key: TEXTURE_KEYS.supportBuildings, path: ASSET_PATHS.supportBuildings, frameWidth: 192, frameHeight: 128, frames: 3 },
+  { key: TEXTURE_KEYS.supportBuildings, path: ASSET_PATHS.supportBuildings, frameWidth: 192, frameHeight: 128, frames: 6 },
   { key: TEXTURE_KEYS.cargo, path: ASSET_PATHS.cargo, frameWidth: 32, frameHeight: 32, frames: 4 },
   { key: TEXTURE_KEYS.activityFx, path: ASSET_PATHS.activityFx, frameWidth: 48, frameHeight: 48, frames: 6 },
   { key: TEXTURE_KEYS.uiIcons, path: ASSET_PATHS.uiIcons, frameWidth: 16, frameHeight: 16, frames: 12 },
@@ -150,6 +150,18 @@ export function storageFrameFor(building: BuildingEntity): number {
   if (stored === 0) return 3;
   if (stored < 12) return 4;
   return 5;
+}
+
+export function supportBuildingFrameFor(building: BuildingEntity): number {
+  if (building.type === "researchBench") return 0;
+  if (building.type === "furnace") return 1;
+  if (building.type === "botCradle") return 2;
+  if (building.type === "chargingStation") {
+    if (building.status.startsWith("Charging")) return 5;
+    if (building.chargingBotId) return 4;
+    return 3;
+  }
+  return 0;
 }
 
 export function cargoFrameFor(inventory: Inventory): number | undefined {
