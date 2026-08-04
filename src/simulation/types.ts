@@ -8,7 +8,7 @@ export type ItemId =
   | "basicBattery"
   | "controller";
 
-export type BuildingTypeId = "storage" | "researchBench" | "furnace" | "botCradle";
+export type BuildingTypeId = "storage" | "researchBench" | "furnace" | "botCradle" | "chargingStation";
 export type ResearchId = "dedicatedSmelting" | "utilityBotSystems" | "localPower" | "precisionAssembly";
 export type RecipeId =
   | "microIron"
@@ -117,29 +117,82 @@ export interface BotTask {
   recipeId?: RecipeId;
   payload?: Inventory;
   nextKind?: BotTaskKind;
+  interaction?: InteractionKind;
+}
+
+export type InteractionKind = "deposit" | "input" | "output" | "operator" | "construction" | "charging";
+export type PathStatus = "idle" | "planned" | "moving" | "arrived" | "blocked";
+
+export interface BotPathState {
+  tiles: GridPoint[];
+  currentIndex: number;
+  requestedDestination?: GridPoint;
+  interactionDestination?: GridPoint;
+  status: PathStatus;
+  repathReason: string;
+  targetId?: string;
+  interaction?: InteractionKind;
+  worldRevision: number;
+}
+
+export type ProgramCommandType =
+  | "findDeposit"
+  | "moveToTarget"
+  | "mineUntilFull"
+  | "claimSupplyRequest"
+  | "claimOutputRequest"
+  | "collectReserved"
+  | "deliverReserved"
+  | "deliverCargo"
+  | "rechargeIfBelow"
+  | "wait"
+  | "repeat";
+
+export type CommandRuntimeStatus = "pending" | "active" | "waiting" | "completed" | "blocked";
+
+export interface ProgramCommandParameters {
+  itemId?: ItemId;
+  resourceType?: "ironOre" | "copperOre";
+  stopPolicy?: "cargoFullOrDepositExhausted";
+  destinationPolicy?: "claimedRequest" | "compatibleStorage";
+  startThreshold?: number;
+  resumeThreshold?: number;
+  duration?: number;
 }
 
 export interface ProgramCommand {
   id: string;
   label: string;
-  kind:
-    | "findDeposit"
-    | "move"
-    | "mine"
-    | "deliver"
-    | "pickupRequest"
-    | "collectOutput"
-    | "deliverStorage"
-    | "recharge"
-    | "wait"
-    | "repeat";
+  kind: ProgramCommandType;
+  parameters: ProgramCommandParameters;
+  runtimeStatus: CommandRuntimeStatus;
+}
+
+export interface ProgramRuntimeState {
+  elapsed: number;
+  phase: string;
+  zeroDurationTransitions: number;
+  lastTransitionTick: number;
+  suspendedTargetId?: string;
 }
 
 export interface BotProgram {
+  id: string;
   templateId: ProgramTemplateId;
   name: string;
   commands: ProgramCommand[];
   running: boolean;
+  instructionPointer: number;
+  currentCommandId?: string;
+  runtime: ProgramRuntimeState;
+  currentTargetId?: string;
+  currentRequestId?: string;
+  currentReservationId?: string;
+  blockingReason: string;
+  loopCount: number;
+  lastCompletedCommandId?: string;
+  lastFailure?: string;
+  // Kept as serializable compatibility/readout aliases for older saves and UI.
   currentStep: number;
   blockedReason: string;
   phase: string;
@@ -160,6 +213,7 @@ export interface BotEntity {
   reservedInventory: Inventory;
   modules: ModuleId[];
   task: BotTask;
+  path: BotPathState;
   program?: BotProgram;
   status: string;
   blockingReason: string;
@@ -187,6 +241,8 @@ export interface BuildingEntity {
   operatorId?: string;
   activeResearchId?: ResearchId;
   cradleQueued: boolean;
+  chargingBotId?: string;
+  chargingProgress?: number;
 }
 
 export interface DepositEntity {
@@ -215,17 +271,31 @@ export type LogisticsRequestType =
   | "construction"
   | "researchItem"
   | "storage";
+export type LogisticsRequestState =
+  | "open"
+  | "claimed"
+  | "awaitingPickup"
+  | "inTransit"
+  | "completed"
+  | "cancelled"
+  | "invalid";
 
 export interface LogisticsRequest {
   id: string;
   type: LogisticsRequestType;
   buildingId: string;
+  sourceId?: string;
+  destinationId?: string;
   itemId: ItemId;
   quantity: number;
+  reservedQuantity: number;
   claimedBy?: string;
+  state: LogisticsRequestState;
   active: boolean;
   label: string;
 }
+
+export type ReservationState = "reserved" | "inTransit" | "completed" | "released" | "invalid";
 
 export interface Reservation {
   id: string;
@@ -235,6 +305,9 @@ export interface Reservation {
   quantity: number;
   sourceId: string;
   destinationId: string;
+  state: ReservationState;
+  collectedQuantity: number;
+  deliveredQuantity: number;
 }
 
 export interface SimulationFlags {
@@ -247,10 +320,18 @@ export interface SimulationFlags {
   furnaceBuilt: boolean;
   fabricatedComponents: boolean;
   cradleBuilt: boolean;
+  chargingStationBuilt: boolean;
   firstBotBuilt: boolean;
   minerRunning: boolean;
   observedOutputFull: boolean;
   autonomousLoop: boolean;
+}
+
+export interface AutomationProgress {
+  ironIngotsDelivered: number;
+  productiveSeconds: number;
+  lastDeliveryAt?: number;
+  completed: boolean;
 }
 
 export interface Notification {
@@ -261,13 +342,14 @@ export interface Notification {
 }
 
 export interface SimulationState {
-  version: 1;
+  version: 2;
   tick: number;
   gameTime: number;
   speed: 0 | 1 | 2 | 4;
   previousSpeed: 1 | 2 | 4;
   nextId: number;
   mapSize: number;
+  worldRevision: number;
   bots: Record<string, BotEntity>;
   buildings: Record<string, BuildingEntity>;
   deposits: Record<string, DepositEntity>;
@@ -276,6 +358,7 @@ export interface SimulationState {
   reservations: Record<string, Reservation>;
   unlocks: string[];
   objectiveIndex: number;
+  automation: AutomationProgress;
   flags: SimulationFlags;
   notifications: Notification[];
   debug: boolean;

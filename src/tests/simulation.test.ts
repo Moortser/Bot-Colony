@@ -172,7 +172,7 @@ describe("logistics, programs, and persistence", () => {
     simulation.assignProgram(bot.id, "factoryHauler");
     simulation.stepFixed(100);
     expect(itemCount(storage.input, "ironIngot")).toBe(2);
-    expect(bot.program?.phase).toBe("acquire");
+    expect(bot.program?.loopCount).toBeGreaterThan(0);
     expect(Object.values(simulation.state.reservations)).toHaveLength(0);
   });
 

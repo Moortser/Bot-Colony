@@ -147,6 +147,19 @@ export const BUILDINGS: Record<BuildingTypeId, BuildingDefinition> = {
     unlockId: "building.botCradle",
     color: 0x6b6c88,
   },
+  chargingStation: {
+    id: "chargingStation",
+    name: "Basic Charging Station",
+    description: "A local power buffer with one reservable Utility Bot charging dock.",
+    footprint: { width: 1, height: 2 },
+    cost: { ironIngot: 1, copperIngot: 1, basicBattery: 1 },
+    inputCapacity: 0,
+    outputCapacity: 0,
+    buildTime: 7,
+    knownAtStart: false,
+    unlockId: "building.chargingStation",
+    color: 0x4f7775,
+  },
 };
 
 export const RESEARCH: Record<ResearchId, ResearchDefinition> = {
@@ -173,6 +186,7 @@ export const RESEARCH: Record<ResearchId, ResearchDefinition> = {
     energyPerSecond: 0.45,
     unlockIds: [
       "building.botCradle",
+      "building.chargingStation",
       "bot.basicUtility",
       "module.miningTool",
       "module.cargoRack",
@@ -238,8 +252,8 @@ export const OBJECTIVES = [
   { id: "furnace", title: "Dedicated Production", detail: "Construct a Basic Furnace and supply its input." },
   { id: "components", title: "Understand a Complete Bot", detail: "Fabricate one of each component and complete Basic Utility Bot Systems." },
   { id: "cradle", title: "The Seed Is No Longer Alone", detail: "Construct a cradle, fabricate a second component set, and build a Utility Bot." },
-  { id: "miner", title: "Automate Repetition", detail: "Assign the Iron Miner template. Let the furnace output fill once." },
-  { id: "loop", title: "Close the Loop", detail: "Build a second bot and assign Factory Hauler. Watch ore become stored ingots autonomously." },
+  { id: "miner", title: "Automate Repetition", detail: "Build a Charging Station, assign Iron Miner, and let furnace output fill once." },
+  { id: "loop", title: "Close the Loop", detail: "Deliver 3 automated iron ingots and sustain both programs for 30 seconds." },
 ] satisfies ObjectiveDefinition[];
 
 export const ITEM_ORDER = Object.keys(ITEMS) as ItemId[];

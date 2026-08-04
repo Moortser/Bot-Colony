@@ -7,6 +7,7 @@ import {
   SHEETS,
   SPRITE_ORIGINS,
   storageFrameFor,
+  supportBuildingFrameFor,
   terrainFrameAt,
   ZOOM_STEPS,
 } from "../game/assets/manifest";
@@ -100,5 +101,15 @@ describe("state-derived sprite frames", () => {
     expect(storageFrameFor(storage({ complete: true }))).toBe(3);
     expect(storageFrameFor(storage({ complete: true, input: { ironIngot: 3 } }))).toBe(4);
     expect(storageFrameFor(storage({ complete: true, input: { ironOre: 20 } }))).toBe(5);
+  });
+
+  it("maps charging-station dock state to stable support-building frames", () => {
+    const station = storage({ type: "chargingStation", complete: true, status: "Dock available" });
+    expect(supportBuildingFrameFor(station)).toBe(3);
+    station.chargingBotId = "bot-a";
+    station.status = "Dock reserved by Utility Bot";
+    expect(supportBuildingFrameFor(station)).toBe(4);
+    station.status = "Charging Utility Bot";
+    expect(supportBuildingFrameFor(station)).toBe(5);
   });
 });

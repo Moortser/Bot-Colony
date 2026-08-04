@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { BUILDINGS } from "../data/content";
 import { runtime } from "../runtime";
+import { blockedTileKeys, interactionCandidates } from "../simulation/pathfinding/grid";
 import type { BotEntity, BuildingEntity, GridPoint, SelectableEntity } from "../simulation/types";
 import {
   cargoFrameFor,
@@ -12,6 +13,7 @@ import {
   SHEETS,
   SPRITE_ORIGINS,
   storageFrameFor,
+  supportBuildingFrameFor,
   terrainFrameAt,
   TEXTURE_KEYS,
   ZOOM_STEPS,
@@ -376,7 +378,7 @@ export class GameScene extends Phaser.Scene {
     let frame = storageFrameFor(building);
     if (building.type !== "storage" && building.complete) {
       texture = TEXTURE_KEYS.supportBuildings;
-      frame = building.type === "researchBench" ? 0 : building.type === "furnace" ? 1 : 2;
+      frame = supportBuildingFrameFor(building);
     }
     view.main
       .setTexture(texture, frame)
@@ -406,6 +408,36 @@ export class GameScene extends Phaser.Scene {
         );
       }
     }
+    if (selected.kind === "bot") this.drawSelectedBotPath(selected);
+  }
+
+  private drawSelectedBotPath(bot: BotEntity): void {
+    if (bot.path.tiles.length === 0) return;
+    const remaining = [bot.position, ...bot.path.tiles.slice(bot.path.currentIndex)];
+    this.debugLayer.lineStyle(3, 0x67c5bd, 1);
+    for (let index = 0; index < remaining.length - 1; index += 1) {
+      const from = this.iso(remaining[index]!);
+      const to = this.iso(remaining[index + 1]!);
+      this.debugLayer.lineBetween(Math.round(from.x), Math.round(from.y), Math.round(to.x), Math.round(to.y));
+    }
+    this.debugLayer.fillStyle(0xb7eee2, 1);
+    for (const tile of bot.path.tiles.slice(bot.path.currentIndex)) {
+      const node = this.iso(tile);
+      this.debugLayer.fillRect(Math.round(node.x - 2), Math.round(node.y - 2), 4, 4);
+    }
+    const destination = bot.path.interactionDestination ? this.iso(bot.path.interactionDestination) : undefined;
+    if (destination) {
+      this.debugLayer.lineStyle(2, 0xf3c557, 1);
+      this.debugLayer.strokeRect(Math.round(destination.x - 6), Math.round(destination.y - 4), 12, 8);
+      this.debugLayer.lineBetween(destination.x - 8, destination.y, destination.x + 8, destination.y);
+      this.debugLayer.lineBetween(destination.x, destination.y - 7, destination.x, destination.y + 7);
+    }
+    const target = bot.path.targetId ? runtime.simulation.getEntity(bot.path.targetId) : undefined;
+    if (target) {
+      const point = this.iso(target.position);
+      this.debugLayer.lineStyle(1, 0xef9b88, 0.8);
+      this.debugLayer.strokeRect(Math.round(point.x - 8), Math.round(point.y - 8), 16, 12);
+    }
   }
 
   private renderPlacement(): void {
@@ -429,6 +461,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawDebug(entities: SelectableEntity[], selected?: SelectableEntity): void {
+    const state = runtime.simulation.state;
+    const blocked = blockedTileKeys(state);
+    for (let x = 0; x < state.mapSize; x += 1) {
+      for (let y = 0; y < state.mapSize; y += 1) {
+        const point = this.iso({ x, y });
+        const isBlocked = blocked.has(`${x},${y}`);
+        this.debugLayer.fillStyle(isBlocked ? 0xc75b50 : 0x6d966f, isBlocked ? 0.65 : 0.2);
+        this.debugLayer.fillRect(Math.round(point.x), Math.round(point.y), 2, 2);
+      }
+    }
     this.debugLayer.lineStyle(1, 0xf0d47b, 0.5);
     for (const entity of entities) {
       const point = this.iso(entity.position);
@@ -448,6 +490,18 @@ export class GameScene extends Phaser.Scene {
           this.debugLayer.fillStyle(0xf3c557, 1);
           this.debugLayer.fillRect(Math.round(target.x - 2), Math.round(target.y - 2), 4, 4);
         }
+      }
+      if (entity.kind === "deposit") {
+        for (const interaction of interactionCandidates(entity, "deposit")) {
+          const target = this.iso(interaction);
+          this.debugLayer.fillStyle(0x67c5bd, 0.9);
+          this.debugLayer.fillRect(Math.round(target.x - 2), Math.round(target.y - 2), 4, 4);
+        }
+      }
+      if (entity.kind === "bot" && entity.path.tiles[entity.path.currentIndex]) {
+        const node = this.iso(entity.path.tiles[entity.path.currentIndex]!);
+        this.debugLayer.fillStyle(0xffffff, 1);
+        this.debugLayer.fillRect(Math.round(node.x - 3), Math.round(node.y - 3), 6, 6);
       }
     }
     if (selected) {
