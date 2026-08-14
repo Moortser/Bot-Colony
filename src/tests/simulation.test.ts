@@ -77,6 +77,84 @@ describe("Seed bootstrap systems", () => {
     expect(simulation.state.buildings[id!]?.complete).toBe(true);
   });
 
+  it("preserves reserved construction cargo through power loss, recharge, and delivery resumption", () => {
+    const simulation = new Simulation();
+    simulation.seed.position = { x: 20, y: 20 };
+    simulation.seed.battery = 0.2;
+    addItems(simulation.seed.inventory, { ironIngot: 2 });
+
+    const id = simulation.placeBuilding("storage", 25, 20);
+    expect(id).toBeTruthy();
+    simulation.stepFixed(10);
+
+    expect(simulation.seed.task.kind).toBe("moving");
+    expect(simulation.seed.task.nextKind).toBe("building");
+    expect(simulation.seed.task.payload).toEqual({ ironIngot: 2 });
+    expect(simulation.seed.blockingReason).toBe("Insufficient power");
+    expect(simulation.seed.inventory).toEqual({ ironIngot: 2 });
+    expect(simulation.seed.reservedInventory).toEqual({ ironIngot: 2 });
+    expect(simulation.state.buildings[id!]?.constructionInventory).toEqual({});
+
+    expect(simulation.commandSolar()).toBe(true);
+    expect(simulation.seed.suspendedTask?.kind).toBe("moving");
+    simulation.stepFixed(20);
+    expect(simulation.commandSolar()).toBe(true);
+    expect(simulation.seed.task.kind).toBe("moving");
+
+    for (let step = 0; step < 100 && simulation.seed.task.kind === "moving"; step += 1) {
+      simulation.stepFixed();
+    }
+
+    expect(simulation.seed.task.kind).toBe("building");
+    expect(simulation.seed.inventory).toEqual({});
+    expect(simulation.seed.reservedInventory).toEqual({});
+    expect(simulation.state.buildings[id!]?.constructionInventory).toEqual({ ironIngot: 2 });
+    expect(
+      itemCount(simulation.seed.inventory, "ironIngot") +
+        itemCount(simulation.seed.reservedInventory, "ironIngot") +
+        itemCount(simulation.state.buildings[id!]?.constructionInventory ?? {}, "ironIngot"),
+    ).toBe(2);
+  });
+
+  it("pauses construction at zero battery and resumes preserved progress without repaying materials", () => {
+    const simulation = new Simulation();
+    simulation.seed.position = { x: 20, y: 20 };
+    simulation.seed.battery = 100;
+    addItems(simulation.seed.inventory, { ironIngot: 2 });
+
+    const id = simulation.placeBuilding("storage", 21, 20);
+    expect(id).toBeTruthy();
+    simulation.stepFixed();
+    simulation.seed.battery = 0.09;
+    simulation.stepFixed(3);
+
+    const building = simulation.state.buildings[id!];
+    const pausedProgress = building?.constructionProgress ?? 0;
+    expect(simulation.seed.battery).toBe(0);
+    expect(simulation.seed.task.kind).toBe("building");
+    expect(simulation.seed.blockingReason).toBe("Insufficient power");
+    expect(building?.blockingReason).toBe("Insufficient power");
+    expect(pausedProgress).toBeGreaterThan(0);
+    expect(pausedProgress).toBeLessThan(1);
+    expect(building?.constructionInventory).toEqual({ ironIngot: 2 });
+    expect(simulation.seed.inventory).toEqual({});
+    expect(simulation.seed.reservedInventory).toEqual({});
+
+    expect(simulation.commandSolar()).toBe(true);
+    expect(simulation.seed.suspendedTask?.progress).toBeCloseTo(pausedProgress * BUILDINGS.storage.buildTime);
+    simulation.stepFixed(10);
+    expect(simulation.commandSolar()).toBe(true);
+    expect(simulation.seed.task.kind).toBe("building");
+    expect(building?.constructionProgress).toBeCloseTo(pausedProgress);
+
+    simulation.stepFixed(60);
+    expect(building?.complete).toBe(true);
+    expect(building?.constructionProgress).toBe(1);
+    expect(building?.constructionInventory).toEqual({});
+    expect(simulation.seed.inventory).toEqual({});
+    expect(simulation.seed.reservedInventory).toEqual({});
+  });
+
   it("runs dedicated furnace production and stops on full output", () => {
     const simulation = new Simulation();
     const furnace = addCompletedBuilding(simulation, "furnace-test", "furnace", 22, 22);

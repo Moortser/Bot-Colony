@@ -3,6 +3,8 @@ import { BOT_FRAMES, BUILDINGS, ITEMS } from "../data/content";
 import { runtime } from "../runtime";
 import type { BotEntity, BuildingEntity, DepositEntity, GridPoint, SelectableEntity } from "../simulation/types";
 import { gridToScreen, isoDepth, roundGrid, screenToGrid, TILE_HEIGHT, TILE_WIDTH } from "./iso";
+import { PointerGestureGuard } from "./pointerGesture";
+import { RenderTimeline } from "./renderTimeline";
 
 const ORIGIN_X = 0;
 const ORIGIN_Y = 120;
@@ -20,7 +22,8 @@ export class GameScene extends Phaser.Scene {
   private cameraStart?: PointLike;
   private dragging = false;
   private lastPinchDistance = 0;
-  private lastRenderAt = -1;
+  private readonly pointerGesture = new PointerGestureGuard();
+  private readonly renderTimeline = new RenderTimeline();
   private cameraMovedByPlayer = false;
 
   public constructor() {
@@ -46,9 +49,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   public update(_time: number, deltaMs: number): void {
+    if (this.renderTimeline.isStale(runtime.simulationRevision)) {
+      this.renderTimeline.shouldRender(
+        runtime.simulation.state.gameTime,
+        runtime.simulation.state.speed,
+        runtime.simulationRevision,
+      );
+      this.renderWorld();
+      runtime.refreshUi();
+      return;
+    }
     runtime.simulation.advance(deltaMs / 1000);
-    if (runtime.simulation.state.gameTime - this.lastRenderAt >= 0.05 || runtime.simulation.state.speed === 0) {
-      this.lastRenderAt = runtime.simulation.state.gameTime;
+    if (
+      this.renderTimeline.shouldRender(
+        runtime.simulation.state.gameTime,
+        runtime.simulation.state.speed,
+        runtime.simulationRevision,
+      )
+    ) {
       this.renderWorld();
       runtime.refreshUi();
     }
@@ -59,6 +77,7 @@ export class GameScene extends Phaser.Scene {
     this.input.mouse?.disableContextMenu();
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.pointerGesture.pointerDown(pointer.id);
       if (pointer.rightButtonDown()) {
         runtime.placementType = undefined;
         runtime.placementTile = undefined;
@@ -73,6 +92,7 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       const activePointers = this.input.manager.pointers.filter((candidate) => candidate.isDown);
       if (activePointers.length >= 2) {
+        this.pointerGesture.markMultiPointerGesture();
         const first = activePointers[0];
         const second = activePointers[1];
         if (first && second) {
@@ -104,8 +124,9 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      const allowWorldClick = this.pointerGesture.pointerUp(pointer.id);
       this.lastPinchDistance = 0;
-      if (!this.dragging && !pointer.rightButtonReleased()) this.handleWorldClick(pointer);
+      if (allowWorldClick && !this.dragging && !pointer.rightButtonReleased()) this.handleWorldClick(pointer);
       this.pointerStart = undefined;
       this.cameraStart = undefined;
       this.dragging = false;

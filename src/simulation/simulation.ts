@@ -250,14 +250,27 @@ export class Simulation {
     const seed = this.seed;
     if (seed.solarDeployed) {
       seed.solarDeployed = false;
-      this.setIdle(seed, "Solar array retracted", "");
+      const suspendedTask = seed.suspendedTask;
+      seed.suspendedTask = undefined;
+      if (suspendedTask) {
+        seed.task = suspendedTask;
+        seed.status = `Resuming // ${suspendedTask.label}`;
+        seed.blockingReason = "";
+      } else {
+        this.setIdle(seed, "Solar array retracted", "");
+      }
       return true;
     }
-    this.cancelBotTask(seed);
+    const pausedForPower = seed.blockingReason === "Insufficient power";
+    if (seed.task.kind !== "idle" && seed.task.kind !== "charging") {
+      seed.suspendedTask = clone(seed.task);
+    }
     seed.solarDeployed = true;
     seed.task = { kind: "charging", label: "Solar array deployed", progress: 0, duration: 0 };
     seed.status = "Charging from local sunlight";
-    seed.blockingReason = "Movement locked while solar array is deployed";
+    seed.blockingReason = pausedForPower
+      ? "Insufficient power // interrupted task preserved while recharging"
+      : "Movement locked while solar array is deployed";
     this.state.flags.solarDeployed = true;
     this.notify("SOLAR ARRAY DEPLOYED // Movement interlock engaged", "info");
     return true;
@@ -500,7 +513,9 @@ export class Simulation {
     bench.operatorId = undefined;
     bench.status = "Idle";
     bench.blockingReason = "No research selected";
-    if (this.seed.task.targetId === benchId) this.cancelBotTask(this.seed);
+    if (this.seed.task.targetId === benchId || this.seed.suspendedTask?.targetId === benchId) {
+      this.cancelBotTask(this.seed);
+    }
     return true;
   }
 
@@ -639,8 +654,7 @@ export class Simulation {
       const recipe = bot.task.recipeId ? RECIPES[bot.task.recipeId] : undefined;
       if (!recipe) return;
       if (bot.battery <= 1) {
-        bot.blockingReason = "Out of usable energy";
-        bot.status = "Stopped: Out of usable energy";
+        this.pauseBotForPower(bot);
         return;
       }
       bot.task.progress += delta;
@@ -670,8 +684,16 @@ export class Simulation {
     if (bot.task.kind === "building") {
       const building = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
       if (!building) return this.setIdle(bot, "Construction cancelled", "Destination invalid");
-      bot.task.progress += delta;
-      bot.battery = Math.max(0, bot.battery - 0.45 * delta);
+      if (bot.battery <= 0) {
+        building.status = "Paused: Insufficient power";
+        building.blockingReason = "Insufficient power";
+        this.pauseBotForPower(bot);
+        return;
+      }
+      const workDelta = Math.min(delta, bot.battery / 0.45);
+      bot.task.progress += workDelta;
+      bot.battery = Math.max(0, bot.battery - 0.45 * workDelta);
+      if (bot.battery < Number.EPSILON) bot.battery = 0;
       building.constructionProgress = Math.min(1, bot.task.progress / bot.task.duration);
       building.status = `Under construction // ${Math.floor(building.constructionProgress * 100)}%`;
       building.blockingReason = "";
@@ -685,6 +707,10 @@ export class Simulation {
         this.markBuildingFlag(building.type);
         this.notify(`${building.name.toUpperCase()} // Construction complete`, "success");
         this.setIdle(bot, `${building.name} construction complete`, "");
+      } else if (workDelta < delta || bot.battery <= 0) {
+        building.status = "Paused: Insufficient power";
+        building.blockingReason = "Insufficient power";
+        this.pauseBotForPower(bot);
       }
       return;
     }
@@ -700,10 +726,25 @@ export class Simulation {
     const dy = destination.y - bot.position.y;
     const remaining = Math.hypot(dx, dy);
     const speed = BOT_FRAMES[bot.frame].moveSpeed;
-    const amount = speed * delta;
-    if (bot.battery <= 0.5) return this.setIdle(bot, "Stopped: Battery depleted", "Out of usable energy");
+    if (remaining <= Number.EPSILON) {
+      bot.position = { ...destination };
+      const nextKind = bot.task.nextKind ?? "idle";
+      bot.task = {
+        ...bot.task,
+        kind: nextKind,
+        label: bot.task.label,
+        destination: undefined,
+        nextKind: undefined,
+        progress: 0,
+      };
+      this.onArrival(bot);
+      return;
+    }
+    if (bot.battery <= 0) return this.pauseBotForPower(bot);
+    const amount = Math.min(speed * delta, remaining, bot.battery / 0.16);
     bot.battery = Math.max(0, bot.battery - 0.16 * amount);
-    if (remaining <= amount) {
+    if (bot.battery < Number.EPSILON) bot.battery = 0;
+    if (remaining <= amount + Number.EPSILON) {
       bot.position = { ...destination };
       const nextKind = bot.task.nextKind ?? "idle";
       bot.task = {
@@ -719,6 +760,7 @@ export class Simulation {
     }
     bot.position.x += (dx / remaining) * amount;
     bot.position.y += (dy / remaining) * amount;
+    if (bot.battery <= 0) this.pauseBotForPower(bot);
   }
 
   private onArrival(bot: BotEntity): void {
@@ -786,7 +828,7 @@ export class Simulation {
     const deposit = bot.task.targetId ? this.state.deposits[bot.task.targetId] : undefined;
     if (!deposit || deposit.remaining <= 0) return this.setIdle(bot, "Stopped: Deposit exhausted", "No resource remaining");
     if (!canFit(bot.inventory, bot.inventoryCapacity)) return this.setIdle(bot, "Stopped: Cargo full", "Cargo capacity reached");
-    if (bot.battery < 2) return this.setIdle(bot, "Stopped: Low battery", "Deploy solar to recharge");
+    if (bot.battery < 2) return this.pauseBotForPower(bot);
     bot.task.progress += delta;
     bot.battery = Math.max(0, bot.battery - 0.65 * delta);
     if (bot.task.progress >= bot.task.duration) {
@@ -902,6 +944,7 @@ export class Simulation {
         node.blockingReason = "Assigned operator is not at the bench";
       } else if (operator.battery <= 1) {
         node.blockingReason = "Operator has insufficient power";
+        this.pauseBotForPower(operator);
       } else if (bench.power <= 1) {
         node.blockingReason = "Bench has insufficient power";
       } else {
@@ -1265,20 +1308,31 @@ export class Simulation {
   }
 
   private cancelBotTask(bot: BotEntity): void {
-    if (bot.task.payload) removeItems(bot.reservedInventory, bot.task.payload);
-    if (bot.task.kind === "researching" || (bot.task.kind === "moving" && bot.task.nextKind === "researching")) {
-      const bench = bot.task.targetId ? this.state.buildings[bot.task.targetId] : undefined;
-      if (bench?.activeResearchId) this.cancelResearch(bench.id);
+    const tasks = [bot.task, bot.suspendedTask].filter((task): task is BotTask => Boolean(task));
+    for (const task of tasks) {
+      if (task.payload) removeItems(bot.reservedInventory, task.payload);
     }
+    const researchTask = tasks.find(
+      (task) => task.kind === "researching" || (task.kind === "moving" && task.nextKind === "researching"),
+    );
+    const bench = researchTask?.targetId ? this.state.buildings[researchTask.targetId] : undefined;
     bot.task = clone(IDLE_TASK);
+    bot.suspendedTask = undefined;
     bot.solarDeployed = false;
     this.releaseBotClaims(bot.id);
+    if (bench?.activeResearchId) this.cancelResearch(bench.id);
   }
 
   private setIdle(bot: BotEntity, status: string, blockingReason: string): void {
     bot.task = clone(IDLE_TASK);
+    bot.suspendedTask = undefined;
     bot.status = status;
     bot.blockingReason = blockingReason;
+  }
+
+  private pauseBotForPower(bot: BotEntity): void {
+    bot.status = "Paused: Insufficient power";
+    bot.blockingReason = "Insufficient power";
   }
 
   private reject(bot: BotEntity, reason: string): false {

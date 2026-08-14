@@ -160,6 +160,7 @@ export interface BotEntity {
   reservedInventory: Inventory;
   modules: ModuleId[];
   task: BotTask;
+  suspendedTask?: BotTask;
   program?: BotProgram;
   status: string;
   blockingReason: string;
