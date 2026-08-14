@@ -1,28 +1,59 @@
-# Bot Colony Prototype (Godot 4.5.1)
+# Bot Colony — First Playable Foundation
 
-## Overview
-This repo contains a minimal, readable top-down colony/factory sim prototype built in Godot 4.5.1 using GDScript only. The focus is on clarity and grid-based logic rather than polish.
+Bot Colony is an isometric browser factory-management prototype about a self-replicating von Neumann probe. The Seed Drone lands with no stored resources and bootstraps a physical iron-production loop from sunlight and local ore.
 
-## File Responsibilities
-- `Main.tscn`: Root scene with the required node hierarchy and UI layout.
-- `scripts/main.gd`: Scene setup, input handling, UI updates, and wiring between player + sim.
-- `scripts/constants.gd`: Centralized constants (item keys, smelt time, tile size, furnace cost).
-- `scripts/sim.gd`: World state (resources, furnaces), ticking loop, and furnace auto-smelting logic.
-- `scripts/player.gd`: Player grid movement, inventory, and mining action.
-- `scripts/resource_node.gd`: Resource type/remaining count, plus simple visual color.
-- `scripts/furnace.gd`: Furnace inventory and smelt progress storage.
+This implementation uses Phaser 3, strict TypeScript, Vite, a deterministic fixed-step simulation, and a DOM management interface. The simulation owns all authoritative/saveable state; Phaser only renders and translates pointer input.
 
-## Smelting Loop
-1. `main.gd` calls `sim.tick(delta)` every frame.
-2. `sim.gd` checks each furnace:
-   - If it has at least 1 coal and at least 1 ore, it increments `smelt_progress`.
-   - When `smelt_progress` reaches `SMELT_TIME`, it consumes 1 coal and 1 ore and produces a plate.
-3. If the furnace lacks fuel or ore, `smelt_progress` resets to 0.
+## Run
 
-While standing on a furnace tile, the sim automatically transfers the player's coal and ore into the furnace so it can smelt without extra UI steps.
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
 
-## Extending Later (Bots / Modules)
-- Add new units as separate scenes and register them in `sim.gd` (e.g., bots).
-- Introduce a job system in `sim.gd` for mining, hauling, and fueling.
-- Expand item types in `constants.gd` and add new production buildings (assemblers, crushers).
-- Replace the simple auto-transfer with explicit inventory UIs or logistics modules.
+Open the local URL printed by Vite. For a production check:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+npm.cmd run preview
+```
+
+## Opening loop
+
+1. Select the Seed Drone and deploy its solar array.
+2. Retract solar, mine iron, and micro-smelt the first ingots.
+3. Place and physically construct Field Storage.
+4. Mine copper, refine it, and construct a Research Bench.
+5. Deliver one Iron Ore and one Iron Ingot to research Dedicated Smelting.
+6. Build and supply the unlocked Basic Furnace.
+7. Fabricate one Frame, Motor, Battery, and Controller; research Basic Utility Bot Systems.
+8. Build a Bot Construction Cradle and activate Utility Bots.
+9. Assign one bot the Iron Miner program. Let furnace output fill to expose the bottleneck.
+10. Assign a second bot Factory Hauler to close the deposit → furnace → storage loop.
+
+The exact provisional recipes are shown in the UI and are intentionally compact for this foundation.
+
+## Controls
+
+- Click/tap: select or place
+- Drag: pan camera
+- Mouse wheel/pinch: zoom
+- Right click or Escape: cancel placement
+- Space: pause/resume
+- `1`, `2`, `3`: normal, 2×, 4× simulation speed
+- `D`: debug overlay
+
+Save and Load store the plain simulation snapshot in browser local storage.
+
+## Code map
+
+- `src/data/content.ts` — items, recipes, blueprints, research, objectives
+- `src/simulation/` — inventories, tasks, research, production, logistics, programs, save state
+- `src/game/` — isometric projection and Phaser rendering/input
+- `src/ui/` — responsive retro-industrial management UI
+- `src/tests/` — projection, inventory, resource flow, research, logistics, and persistence tests
+
+## Repository transition
+
+The earlier Godot prototype is preserved in Git history only. This branch contains no Godot scenes, GDScript, or Godot project metadata.
